@@ -5,6 +5,7 @@ import ReactFlow, { Background, Controls, useReactFlow } from "reactflow";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 import NodeInspector from "./NodeInspector";
+import DotNode from "./DotNode";
 import {
     forceSimulation,
     forceLink,
@@ -38,16 +39,16 @@ function runForceLayout(
         .map((e) => ({ source: nodeMap.get(e.source)!, target: nodeMap.get(e.target)! }));
 
     const sim = forceSimulation(simNodes)
-        .force("link", forceLink(simLinks).id((d: any) => d.id).distance(120).strength(0.3))
-        .force("charge", forceManyBody().strength(-200))
+        .force("link", forceLink(simLinks).id((d: any) => d.id).distance(100).strength(0.4))
+        .force("charge", forceManyBody().strength(-400))
         .force("center", forceCenter(width / 2, height / 2))
-        .force("collide", forceCollide(20))
-        .force("x", forceX(width / 2).strength(0.04))
-        .force("y", forceY(height / 2).strength(0.04))
+        .force("collide", forceCollide(30))
+        .force("x", forceX(width / 2).strength(0.03))
+        .force("y", forceY(height / 2).strength(0.03))
         .stop();
 
-    // Run simulation synchronously
-    for (let i = 0; i < 300; i++) sim.tick();
+    // Run simulation synchronously — more ticks = better convergence
+    for (let i = 0; i < 500; i++) sim.tick();
 
     const positions = new Map<string, { x: number; y: number }>();
     for (const n of simNodes) {
@@ -57,17 +58,10 @@ function runForceLayout(
 }
 
 // ─────────────────────────────────────────────
-// Node color palette
+// Custom node types registration
 // ─────────────────────────────────────────────
 
-const COLORS: Record<string, string> = {
-    customer: "#6b8cce",
-    order: "#e88a8a",
-    delivery: "#e8a87a",
-    invoice: "#d97a7a",
-    journal: "#9b8ec4",
-    payment: "#6bc4c4",
-};
+const nodeTypes = { dot: DotNode };
 
 // ─────────────────────────────────────────────
 // Graph Inner
@@ -134,7 +128,7 @@ function GraphInner({ query, highlightedIds }: { query: string; highlightedIds: 
                 });
 
                 // ── Run force simulation ──
-                const positions = runForceLayout(newNodes, newEdges, 2400, 1600);
+                const positions = runForceLayout(newNodes, newEdges, 3000, 2000);
 
                 // ── Apply positions and styles ──
                 const styledNodes = newNodes.map((n) => {
@@ -143,31 +137,30 @@ function GraphInner({ query, highlightedIds }: { query: string; highlightedIds: 
                     const conns = connectionCounts[n.id] || 0;
                     n.data.connections = conns;
 
-                    // Hub nodes (high connectivity) are slightly larger
                     const isHub = conns > 8;
-                    const size = isHub ? 12 : 7;
 
                     return {
                         ...n,
+                        type: "dot",
                         position: pos,
-                        style: {
-                            width: size,
-                            height: size,
-                            background: COLORS[type] || "#999",
-                            borderRadius: "50%",
-                            border: "none",
-                            opacity: 0.85,
-                        },
+                        data: { ...n.data, label: "", connections: conns },
                     };
                 });
 
-                // ── Style edges ──
-                const styledEdges = newEdges.map((e) => ({
-                    ...e,
-                    type: "default",
-                    style: { stroke: "#c1d5e8", strokeWidth: 0.6, opacity: 0.35 },
-                    animated: false,
-                }));
+                // ── Style edges — adaptive opacity based on hub connectivity ──
+                const styledEdges = newEdges.map((e) => {
+                    const sourceConns = connectionCounts[e.source] || 1;
+                    const targetConns = connectionCounts[e.target] || 1;
+                    const maxConns = Math.max(sourceConns, targetConns);
+                    // Adaptive opacity: hub edges slightly lighter, but ALL edges clearly visible
+                    const opacity = maxConns > 20 ? 0.3 : maxConns > 10 ? 0.45 : maxConns > 5 ? 0.6 : 0.75;
+                    return {
+                        ...e,
+                        type: "straight",
+                        style: { stroke: "#7eadd4", strokeWidth: 1.4, opacity },
+                        animated: false,
+                    };
+                });
 
                 setNodes(styledNodes);
                 setEdges(styledEdges);
@@ -185,16 +178,7 @@ function GraphInner({ query, highlightedIds }: { query: string; highlightedIds: 
                 const isHighlighted = highlightSet.has(rawId);
                 return {
                     ...n,
-                    style: {
-                        ...n.style,
-                        ...(isHighlighted
-                            ? {
-                                  boxShadow: "0 0 0 3px white, 0 0 14px 5px rgba(99,162,255,0.8)",
-                                  opacity: 1,
-                                  zIndex: 10,
-                              }
-                            : {}),
-                    },
+                    data: { ...n.data, highlighted: isHighlighted },
                 };
             }),
         [nodes, highlightSet]
@@ -222,6 +206,7 @@ function GraphInner({ query, highlightedIds }: { query: string; highlightedIds: 
             <ReactFlow
                 nodes={highlightedNodes}
                 edges={highlightedEdges}
+                nodeTypes={nodeTypes}
                 onNodeMouseEnter={(e, node) => {
                     setSelectedNode(node);
                     setPanelPosition({ x: e.clientX + 12, y: e.clientY + 12 });

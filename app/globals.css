@@ -28,11 +28,23 @@ body {
 .react-flow__node {
   cursor: pointer !important;
   transition: transform 0.15s ease;
+  padding: 0 !important;
+  font-size: 0 !important;
 }
 
 .react-flow__node:hover {
   transform: scale(1.8);
   z-index: 20 !important;
+}
+
+/* Make handles invisible but keep them positioned for correct edge routing */
+.react-flow__handle {
+  background: transparent !important;
+  border: none !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
 }
 
 .react-flow__edge-path {
