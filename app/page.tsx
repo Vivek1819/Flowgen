@@ -10,6 +10,7 @@ export default function Home() {
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [lastQuery, setLastQuery] = useState("");
 
 
   const handleSend = async () => {
@@ -20,6 +21,7 @@ export default function Home() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
+    setLastQuery(input);
 
     try {
       const res = await fetch("/api/query", {
@@ -70,7 +72,7 @@ export default function Home() {
           </div>
 
           <div className="h-full flex items-center justify-center text-gray-400">
-            <Graph />
+            <Graph query={lastQuery} />
           </div>
         </div>
 

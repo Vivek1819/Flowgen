@@ -123,7 +123,6 @@ export async function POST(req: Request) {
         }
 
         const safeSQL = generatedSQL
-            .replace(/\bOrder\b/g, '"Order"')
             .replace(/\s+/g, " ")
             .trim();
 
