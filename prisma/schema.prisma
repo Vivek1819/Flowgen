@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Customer {
+  id   String @id
+  name String
+
+  orders   Order[]
+  invoices Invoice[]
+  payments Payment[]
+}
+
+model Order {
+  id            String @id
+  customerId    String
+  createdAt     String
+  totalAmount   Float
+  deliveryStatus String
+
+  customer   Customer @relation(fields: [customerId], references: [id])
+  items      OrderItem[]
+}
+
+model OrderItem {
+  id        String @id
+  orderId   String
+  productId String
+  quantity  Float
+  netAmount Float
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+model Invoice {
+  id                 String @id
+  customerId         String
+  accountingDocument String
+  totalAmount        Float
+  createdAt          String
+
+  customer Customer @relation(fields: [customerId], references: [id])
+}
+
+model Payment {
+  id         String @id
+  customerId String
+  amount     Float
+  createdAt  String
+
+  customer Customer @relation(fields: [customerId], references: [id])
+}
