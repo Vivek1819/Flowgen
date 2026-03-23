@@ -1,4 +1,52 @@
+"use client";
+import { useState } from "react";
+
 export default function Home() {
+
+  const [messages, setMessages] = useState<
+    { role: "user" | "assistant"; content: string }[]
+  >([]);
+
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+
+    const userMessage = { role: "user" as const, content: input };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: input }),
+      });
+
+      const data = await res.json();
+
+      const botMessage = {
+        role: "assistant" as const,
+        content: data.answer,
+      };
+
+      setMessages((prev) => [...prev, botMessage]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Something went wrong" },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* Header */}
@@ -8,7 +56,7 @@ export default function Home() {
 
       {/* Main */}
       <div className="flex flex-1 overflow-hidden">
-        
+
         {/* Graph Panel */}
         <div className="w-3/4 relative bg-white border-r">
           <div className="absolute top-3 left-3 flex gap-2">
@@ -27,7 +75,7 @@ export default function Home() {
 
         {/* Chat Panel */}
         <div className="w-1/4 flex flex-col bg-white">
-          
+
           {/* Chat Header */}
           <div className="p-4 border-b">
             <h2 className="text-sm font-semibold">Chat with Graph</h2>
@@ -51,8 +99,26 @@ export default function Home() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 p-4 overflow-y-auto text-sm text-gray-400">
-            No messages yet
+          <div className="flex-1 p-4 overflow-y-auto text-sm space-y-3">
+            {messages.length === 0 && (
+              <p className="text-gray-400">No messages yet</p>
+            )}
+
+            {messages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`p-2 rounded ${msg.role === "user"
+                  ? "bg-black text-white ml-auto max-w-[80%]"
+                  : "bg-gray-100 text-gray-800 max-w-[80%]"
+                  }`}
+              >
+                {msg.content}
+              </div>
+            ))}
+
+            {loading && (
+              <p className="text-gray-400 text-xs">Thinking...</p>
+            )}
           </div>
 
           {/* Input */}
@@ -60,10 +126,15 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <input
                 type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
                 placeholder="Analyze anything"
-                className="flex-1 border rounded px-3 py-2 text-sm"
+                className="flex-1 border rounded px-3 py-2 text-sm bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black"
               />
-              <button className="px-3 py-2 text-sm bg-gray-200 rounded">
+              <button
+                onClick={handleSend}
+                className="px-3 py-2 text-sm bg-black text-white rounded"
+              >
                 Send
               </button>
             </div>
