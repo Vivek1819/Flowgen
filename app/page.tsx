@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import Graph from "./components/Graph";
-import NodeInspector from "./components/NodeInspector";
 
 export default function Home() {
 
@@ -12,8 +11,6 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastQuery, setLastQuery] = useState("");
-  const [selectedNode, setSelectedNode] = useState<any>(null);
-  const [panelPosition, setPanelPosition] = useState({ x: 0, y: 0 });
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
 
 
@@ -80,7 +77,7 @@ export default function Home() {
           </div>
 
           <div className="h-full flex items-center justify-center text-gray-400">
-            <Graph query={lastQuery} setSelectedNode={setSelectedNode} setPanelPosition={setPanelPosition} highlightedIds={highlightedIds} />
+            <Graph query={lastQuery} highlightedIds={highlightedIds} />
           </div>
         </div>
 
@@ -152,7 +149,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-        <NodeInspector node={selectedNode} position={panelPosition} />
       </div>
     </div>
   );

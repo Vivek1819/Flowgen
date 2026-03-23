@@ -1,31 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactFlow, { Background, Controls, useReactFlow } from "reactflow";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
+import NodeInspector from "./NodeInspector";
 
-function GraphInner({ query, setSelectedNode, setPanelPosition, highlightedIds }: { query: string, setSelectedNode: any, setPanelPosition: any, highlightedIds: string[] }) {
+function GraphInner({ query, highlightedIds }: { query: string, highlightedIds: string[] }) {
     const [nodes, setNodes] = useState<any[]>([]);
     const [edges, setEdges] = useState<any[]>([]);
+    const [selectedNode, setSelectedNode] = useState<any>(null);
+    const [panelPosition, setPanelPosition] = useState({ x: 0, y: 0 });
     const { getViewport } = useReactFlow();
+    const highlightSet = useMemo(() => new Set(highlightedIds), [highlightedIds]);
 
-    // Build a Set of raw entity IDs for O(1) lookups
-    const highlightSet = new Set(highlightedIds);
-
-    const handleNodeClick = (_: any, node: any) => {
-        setSelectedNode(node);
-
-        const { x, y, zoom } = getViewport();
-
-        const screenX = node.position.x * zoom + x;
-        const screenY = node.position.y * zoom + y;
-
-        setPanelPosition({
-            x: screenX,
-            y: screenY,
-        });
-    };
+    // Unused but kept for future click-to-pin
+    const handleNodeClick = (_: any, _node: any) => {};
 
     useEffect(() => {
         fetch("/api/graph")
@@ -185,9 +175,8 @@ function GraphInner({ query, setSelectedNode, setPanelPosition, highlightedIds }
             });
     }, [query]);
 
-    // Derive highlighted nodes/edges from highlightSet on each render
-    const highlightedNodes = nodes.map(n => {
-        // Node IDs are `type-rawId`, e.g. `order-740506`
+    // Memoize highlighted nodes — only recomputes when nodes or highlightedIds change
+    const highlightedNodes = useMemo(() => nodes.map(n => {
         const rawId = n.id.split("-").slice(1).join("-");
         const isHighlighted = highlightSet.has(rawId);
         return {
@@ -200,9 +189,10 @@ function GraphInner({ query, setSelectedNode, setPanelPosition, highlightedIds }
                 } : {})
             }
         };
-    });
+    }), [nodes, highlightSet]);
 
-    const highlightedEdges = edges.map(e => {
+    // Memoize highlighted edges
+    const highlightedEdges = useMemo(() => edges.map(e => {
         const sourceRaw = e.source.split("-").slice(1).join("-");
         const targetRaw = e.target.split("-").slice(1).join("-");
         const isHighlighted = highlightSet.has(sourceRaw) && highlightSet.has(targetRaw);
@@ -211,7 +201,7 @@ function GraphInner({ query, setSelectedNode, setPanelPosition, highlightedIds }
             style: isHighlighted ? { stroke: "#facc15", strokeWidth: 2 } : undefined,
             animated: isHighlighted,
         };
-    });
+    }), [edges, highlightSet]);
 
     return (
         <div className="w-full h-full">
@@ -220,29 +210,22 @@ function GraphInner({ query, setSelectedNode, setPanelPosition, highlightedIds }
                 edges={highlightedEdges}
                 onNodeMouseEnter={(e, node) => {
                     setSelectedNode(node);
-                    setPanelPosition({
-                        x: e.clientX + 12,
-                        y: e.clientY + 12,
-                    });
+                    setPanelPosition({ x: e.clientX + 12, y: e.clientY + 12 });
                 }}
                 onNodeMouseMove={(e) => {
-                    setPanelPosition({
-                        x: e.clientX + 12,
-                        y: e.clientY + 12,
-                    });
+                    setPanelPosition({ x: e.clientX + 12, y: e.clientY + 12 });
                 }}
-                onNodeMouseLeave={() => {
-                    setSelectedNode(null);
-                }}
+                onNodeMouseLeave={() => setSelectedNode(null)}
             >
                 <Background />
                 <Controls />
             </ReactFlow>
+            <NodeInspector node={selectedNode} position={panelPosition} />
         </div>
     );
 }
 
-export default function Graph(props: { query: string, setSelectedNode: any, setPanelPosition: any, highlightedIds: string[] }) {
+export default function Graph(props: { query: string, highlightedIds: string[] }) {
     return (
         <ReactFlowProvider>
             <GraphInner {...props} />
