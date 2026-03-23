@@ -7,6 +7,25 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY!,
 });
 
+function isSafeSQL(sql: string) {
+    const lower = sql.toLowerCase().trim();
+
+    // Only allow SELECT
+    if (!lower.startsWith("select")) return false;
+
+    // Block dangerous keywords
+    const blocked = [
+        "insert",
+        "update",
+        "delete",
+        "drop",
+        "alter",
+        "truncate",
+    ];
+
+    return !blocked.some((keyword) => lower.includes(keyword));
+}
+
 function isRelevantQuery(query: string) {
     const allowedKeywords = [
         "order",
@@ -89,11 +108,22 @@ export async function POST(req: Request) {
 
         console.log("Generated SQL:", generatedSQL);
 
+        if (!isSafeSQL(generatedSQL)) {
+            return Response.json({
+                answer: "Unsafe or invalid query generated.",
+            });
+        }
+
+        const safeSQL = generatedSQL
+            .replace(/\bOrder\b/g, '"Order"')
+            .replace(/\s+/g, " ")
+            .trim();
+
         // ✅ STEP 2: Execute SQL
         let dbResult;
 
         try {
-            dbResult = await prisma.$queryRawUnsafe(generatedSQL);
+            dbResult = await prisma.$queryRawUnsafe(safeSQL);
         } catch (err) {
             console.error("SQL Execution Error:", err);
 
