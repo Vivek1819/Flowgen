@@ -1,12 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ReactFlow, { Background, Controls } from "reactflow";
+import ReactFlow, { Background, Controls, useReactFlow } from "reactflow";
+import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
-export default function Graph({ query }: { query: string }) {
+function GraphInner({ query, setSelectedNode, setPanelPosition }: { query: string, setSelectedNode: any, setPanelPosition: any }) {
     const [nodes, setNodes] = useState<any[]>([]);
     const [edges, setEdges] = useState<any[]>([]);
+    const { getViewport } = useReactFlow();
+
+    const handleNodeClick = (_: any, node: any) => {
+        setSelectedNode(node);
+
+        const { x, y, zoom } = getViewport();
+
+        const screenX = node.position.x * zoom + x;
+        const screenY = node.position.y * zoom + y;
+
+        setPanelPosition({
+            x: screenX,
+            y: screenY,
+        });
+    };
 
     useEffect(() => {
         fetch("/api/graph")
@@ -30,7 +46,7 @@ export default function Graph({ query }: { query: string }) {
                     newNodes.push({
                         id: `customer-${c.id}`,
                         position: { x: startX + index * spacingX, y: 100 },
-                        data: { label: `Customer: ${c.name}` },
+                        data: { label: `Customer: ${c.name}`, raw: c },
                         style: {
                             background: highlightCustomers ? "#000" : "#fff",
                             color: highlightCustomers ? "#fff" : "#000",
@@ -46,7 +62,7 @@ export default function Graph({ query }: { query: string }) {
                     newNodes.push({
                         id: `order-${o.id}`,
                         position: { x: startX + index * spacingX, y: 250 },
-                        data: { label: `Order: ${o.id}` },
+                        data: { label: `Order: ${o.id}`, raw: o },
                         style: {
                             background: highlightOrders ? "#000" : "#fff",
                             color: highlightOrders ? "#fff" : "#000",
@@ -68,7 +84,7 @@ export default function Graph({ query }: { query: string }) {
                     newNodes.push({
                         id: `invoice-${i.id}`,
                         position: { x: startX + index * spacingX, y: 400 },
-                        data: { label: `Invoice: ${i.id}` },
+                        data: { label: `Invoice: ${i.id}`, raw: i },
                         style: {
                             background: highlightInvoices ? "#000" : "#fff",
                             color: highlightInvoices ? "#fff" : "#000",
@@ -92,10 +108,22 @@ export default function Graph({ query }: { query: string }) {
 
     return (
         <div className="w-full h-full">
-            <ReactFlow nodes={nodes} edges={edges}>
+            <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodeClick={handleNodeClick}
+            >
                 <Background />
                 <Controls />
             </ReactFlow>
         </div>
+    );
+}
+
+export default function Graph(props: { query: string, setSelectedNode: any, setPanelPosition: any }) {
+    return (
+        <ReactFlowProvider>
+            <GraphInner {...props} />
+        </ReactFlowProvider>
     );
 }

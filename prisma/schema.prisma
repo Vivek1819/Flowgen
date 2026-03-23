@@ -25,8 +25,37 @@ model Order {
 
   metadata String?
 
-  customer Customer @relation(fields: [customerId], references: [id])
-  items    OrderItem[]
+  customer   Customer   @relation(fields: [customerId], references: [id])
+  items      OrderItem[]
+  deliveries Delivery[]
+}
+
+model Product {
+  id   String @id
+  name String
+
+  orderItems OrderItem[]
+}
+
+model JournalEntry {
+  id        String @id
+  invoiceId String
+  amount    Float
+  createdAt String
+
+  metadata String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+}
+
+model Delivery {
+  id        String @id
+  orderId   String?
+  createdAt String
+  status    String
+  metadata String?
+
+  order Order? @relation(fields: [orderId], references: [id])
 }
 
 model OrderItem {
@@ -38,7 +67,8 @@ model OrderItem {
 
   metadata String?
 
-  order Order @relation(fields: [orderId], references: [id])
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
 }
 
 model Invoice {
@@ -50,7 +80,8 @@ model Invoice {
 
   metadata String?
 
-  customer Customer @relation(fields: [customerId], references: [id])
+  customer       Customer      @relation(fields: [customerId], references: [id])
+  journalEntries JournalEntry[]
 }
 
 model Payment {

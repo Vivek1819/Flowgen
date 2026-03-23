@@ -11,6 +11,8 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastQuery, setLastQuery] = useState("");
+  const [selectedNode, setSelectedNode] = useState<any>(null);
+  const [panelPosition, setPanelPosition] = useState({ x: 0, y: 0 });
 
 
   const handleSend = async () => {
@@ -72,7 +74,7 @@ export default function Home() {
           </div>
 
           <div className="h-full flex items-center justify-center text-gray-400">
-            <Graph query={lastQuery} />
+            <Graph query={lastQuery} setSelectedNode={setSelectedNode} setPanelPosition={setPanelPosition} />
           </div>
         </div>
 
@@ -100,6 +102,7 @@ export default function Home() {
               Hi! I can help you analyze the Order to Cash process.
             </p>
           </div>
+
 
           {/* Messages */}
           <div className="flex-1 p-4 overflow-y-auto text-sm space-y-3">
@@ -143,6 +146,80 @@ export default function Home() {
             </div>
           </div>
         </div>
+        {selectedNode && (
+          <div
+            style={{
+              position: "fixed",
+              top: panelPosition.y + 10,
+              left: panelPosition.x + 10,
+              zIndex: 1000,
+            }}
+            className="bg-white text-black p-4 rounded-xl shadow-xl border w-72"
+          >
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="font-semibold text-lg">Node Details</h2>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="text-gray-500 hover:text-black"
+              >
+                ✖
+              </button>
+            </div>
+
+            {/* BASIC */}
+            <p className="text-sm">
+              <span className="font-medium">ID:</span> {selectedNode.data?.raw?.id}
+            </p>
+
+            <p className="text-sm mb-2">
+              <span className="font-medium">Type:</span>{" "}
+              {selectedNode.data?.label}
+            </p>
+
+            {/* EXTRA FIELDS */}
+            {selectedNode.data?.raw?.totalAmount && (
+              <p className="text-sm">
+                <span className="font-medium">Amount:</span>{" "}
+                {selectedNode.data.raw.totalAmount}
+              </p>
+            )}
+
+            {selectedNode.data?.raw?.deliveryStatus && (
+              <p className="text-sm">
+                <span className="font-medium">Status:</span>{" "}
+                {selectedNode.data.raw.deliveryStatus}
+              </p>
+            )}
+
+            {/* METADATA */}
+            {selectedNode.data?.raw?.metadata && (
+              <div className="mt-3">
+                <p className="font-medium text-sm mb-1">Metadata:</p>
+
+                {(() => {
+                  try {
+                    const meta = JSON.parse(selectedNode.data.raw.metadata);
+
+                    return (
+                      <div className="text-xs space-y-1 bg-gray-50 p-2 rounded">
+                        {Object.entries(meta).map(([key, value]) => (
+                          <div key={key}>
+                            <span className="font-medium">{key}:</span>{" "}
+                            {typeof value === "object"
+                              ? JSON.stringify(value)
+                              : String(value)}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  } catch {
+                    return <p className="text-xs text-red-500">Invalid metadata</p>;
+                  }
+                })()}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
