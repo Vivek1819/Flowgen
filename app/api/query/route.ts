@@ -41,6 +41,11 @@ function isRelevantQuery(query: string) {
         "product",
         "products",
         "billing",
+        "journal",
+        "flow",
+        "trace",
+        "broken",
+        "incomplete"
     ];
 
     const lowerQuery = query.toLowerCase();
@@ -84,27 +89,40 @@ export async function POST(req: Request) {
                 {
                     role: "system",
                     content: `
-                        You are an expert SQL generwhat do we change here now
-                        ator.
+                        You are an expert SQL generator for a SAP Order-to-Cash (O2C) database.
 
-                        Generate ONLY SQL queries based on the schema below.
+                        Generate ONLY SQL queries based on the schema below for SQLite.
 
                         Schema:
                         - Customer(id, name)
                         - Order(id, customerId, createdAt, totalAmount, deliveryStatus)
                         - OrderItem(id, orderId, productId, quantity, netAmount)
-                        - Invoice(id, customerId, accountingDocument, totalAmount, createdAt)
+                        - Product(id, name)
+                        - Delivery(id, orderId, createdAt, status)
+                        - DeliveryItem(id, deliveryId, productId, quantity)
+                        - Invoice(id, customerId, orderId, accountingDocument, totalAmount, createdAt)
+                        - InvoiceItem(id, invoiceId, orderId, productId, quantity, netAmount)
+                        - JournalEntry(id, invoiceId, amount, createdAt)
                         - Payment(id, customerId, amount, createdAt)
 
+                        Synonyms & Mapping:
+                        - "Billing Document" or "Bill" = Invoice
+                        - "Journal" = JournalEntry
+                        - "Material" = Product
+                        - "Sales Order" = Order
+
                         Rules:
-                        - Only generate SELECT queries
-                        - Do NOT explain anything
-                        - Do NOT include markdown
-                        - Use correct table names exactly as given
-                        - If a table name is a reserved SQL keyword (like Order), wrap it in double quotes ("Order")
-                        - Keep queries simple
+                        - ONLY generate exactly ONE single SQL query. Never generate multiple queries.
+                        - Only generate SELECT queries.
+                        - Do NOT explain anything. Do NOT include markdown quotes, just plain SQL.
+                        - Use correct table names exactly as given. Wrap table names in double quotes, e.g. "Order".
+                        - For 'Give me ONE example' or tracing, use LIMIT 1 (do NOT use WHERE id = 1 unless an ID is explicitly provided in the user prompt).
+                        - To trace the full flow, JOIN "Order" -> Delivery -> Invoice -> JournalEntry.
+                        - To find incomplete flows, use LEFT JOIN and check for NULL (e.g. Invoice.id IS NULL).
+                        - Always limit results using LIMIT 50 to prevent overflow.
                         `
                 },
+
                 {
                     role: "user",
                     content: userQuery,
@@ -116,6 +134,7 @@ export async function POST(req: Request) {
             sqlGen.choices[0]?.message?.content?.trim() || "";
 
         console.log("Generated SQL:", generatedSQL);
+        require('fs').appendFileSync('sql-logs.txt', 'SQL:\\n' + generatedSQL + '\\n\\n');
 
         if (!isSafeSQL(generatedSQL)) {
             return Response.json({
@@ -131,7 +150,12 @@ export async function POST(req: Request) {
         let dbResult;
 
         try {
-            dbResult = await prisma.$queryRawUnsafe(safeSQL);
+            dbResult = await prisma.$queryRawUnsafe(safeSQL) as any[];
+            if (Array.isArray(dbResult) && dbResult.length > 25) {
+                dbResult = dbResult.slice(0, 25);
+            }
+            console.log("DB Result length:", dbResult?.length);
+            require('fs').appendFileSync('sql-logs.txt', 'DB_RESULT:\\n' + JSON.stringify(serializeBigInt(dbResult)) + '\\n\\n');
         } catch (err) {
             console.error("SQL Execution Error:", err);
 

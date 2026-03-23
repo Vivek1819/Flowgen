@@ -48,6 +48,7 @@ async function main() {
     const orders = readAllJSONLFromFolder(path.join(base, "sales_order_headers"));
     const orderItems = readAllJSONLFromFolder(path.join(base, "sales_order_items"));
     const invoices = readAllJSONLFromFolder(path.join(base, "billing_document_headers"));
+    const invoiceItems = readAllJSONLFromFolder(path.join(base, "billing_document_items"));
     const payments = readAllJSONLFromFolder(path.join(base, "payments_accounts_receivable"));
     const deliveries = readAllJSONLFromFolder(
         path.join(base, "outbound_delivery_headers")
@@ -61,9 +62,31 @@ async function main() {
         path.join(base, "journal_entry_items_accounts_receivable")
     );
 
+    const invoiceToOrderMap = new Map<string, string>();
+    for (const item of invoiceItems) {
+        const invId = get(item, "billingDocument", "BillingDocument");
+        const ordId = get(item, "referenceSdDocument", "ReferenceSdDocument");
+        if (invId && ordId && !invoiceToOrderMap.has(invId)) {
+            invoiceToOrderMap.set(invId, ordId);
+        }
+    }
+
+    const orderItemToProductMap = new Map<string, string>();
+    for (const item of orderItems) {
+        const ordId = get(item, "salesOrder", "SalesOrder");
+        const itemId = get(item, "salesOrderItem", "SalesOrderItem");
+        const material = get(item, "material", "Material");
+        // Sometimes item ID has leading zeros, e.g. "000010" vs "10"
+        if (ordId && itemId && material) {
+            orderItemToProductMap.set(`${ordId}-${Number(itemId)}`, material);
+        }
+    }
+
 
     console.log("Clearing existing data...");
     await prisma.journalEntry.deleteMany();
+    await prisma.invoiceItem.deleteMany();
+    await prisma.deliveryItem.deleteMany();
     await prisma.delivery.deleteMany();
     await prisma.payment.deleteMany();
     await prisma.invoice.deleteMany();
@@ -149,11 +172,77 @@ async function main() {
 
         insertedOrderIds.add(orderId);
         insertedOrders++;
-        if (insertedOrders >= 200) break;
+        if (insertedOrders >= 2000) break; // Insert up to 2000 orders to get good overlap
     }
 
     console.log("Orders inserted:", insertedOrders);
 
+    // ------------------ DUMMY DEPENDENCIES FROM ITEMS ------------------
+    console.log("Injecting missing dependencies for foreign keys...");
+    for (const item of invoiceItems) {
+        const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
+        const productId = get(item, "material", "Material");
+
+        if (productId && !seenProducts.has(productId)) {
+            await prisma.product.upsert({
+                where: { id: productId },
+                update: {},
+                create: { id: productId, name: productId },
+            });
+            seenProducts.add(productId);
+        }
+
+        if (orderId && !insertedOrderIds.has(orderId)) {
+            await prisma.order.upsert({
+                where: { id: orderId },
+                update: {},
+                create: {
+                    id: orderId,
+                    customerId: insertedCustomers > 0 ? customers[0].businessPartner : "UNKNOWN",
+                    createdAt: "",
+                    totalAmount: 0,
+                    deliveryStatus: "UNKNOWN",
+                    metadata: "{}"
+                },
+            });
+            insertedOrderIds.add(orderId);
+        }
+    }
+
+    // Also inject from deliveryItems
+    for (const item of deliveryItems) {
+        const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
+        const orderItemId = get(item, "referenceSdDocumentItem", "ReferenceSdDocumentItem");
+        const productId = orderId && orderItemId
+            ? orderItemToProductMap.get(`${orderId}-${Number(orderItemId)}`) || ""
+            : "";
+
+        if (productId && !seenProducts.has(productId)) {
+            await prisma.product.upsert({
+                where: { id: productId },
+                update: {},
+                create: { id: productId, name: productId },
+            });
+            seenProducts.add(productId);
+        }
+
+        if (orderId && !insertedOrderIds.has(orderId)) {
+            await prisma.order.upsert({
+                where: { id: orderId },
+                update: {},
+                create: {
+                    id: orderId,
+                    customerId: customers[0] ? get(customers[0], "businessPartner", "BusinessPartner") : "UNKNOWN",
+                    createdAt: "",
+                    totalAmount: 0,
+                    deliveryStatus: "UNKNOWN",
+                    metadata: "{}"
+                },
+            });
+            insertedOrderIds.add(orderId);
+        }
+    }
+    
     // ------------------ ORDER ITEMS ------------------
     let insertedItems = 0;
 
@@ -192,6 +281,8 @@ async function main() {
 
         if (!invoiceId || !customerId) continue;
 
+        const orderId = invoiceToOrderMap.get(invoiceId);
+
         await prisma.invoice.upsert({
             where: { id: invoiceId },
             update: {},
@@ -202,6 +293,7 @@ async function main() {
                 totalAmount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
                 createdAt: get(i, "creationDate", "CreationDate") || "",
                 metadata: JSON.stringify(cleanMetadata(i)),
+                orderId: (orderId && insertedOrderIds.has(orderId)) ? orderId : null,
             },
         });
 
@@ -224,7 +316,7 @@ async function main() {
         }
 
         insertedInvoices++;
-        if (insertedInvoices >= 200) break;
+        if (insertedInvoices >= 1000) break;
     }
 
     console.log("Invoices inserted:", insertedInvoices);
@@ -258,6 +350,7 @@ async function main() {
 
     // ------------------ DELIVERIES ------------------
     let insertedDeliveries = 0;
+    const insertedDeliveryIds = new Set<string>();
 
     for (const d of deliveries) {
         const deliveryId = get(d, "deliveryDocument", "DeliveryDocument");
@@ -292,10 +385,68 @@ async function main() {
         });
 
         insertedDeliveries++;
-        if (insertedDeliveries >= 200) break;
+        insertedDeliveryIds.add(deliveryId);
+        if (insertedDeliveries >= 1000) break;
     }
 
     console.log("Deliveries inserted:", insertedDeliveries);
+
+    // ------------------ DELIVERY ITEMS ------------------
+    let insertedDelItems = 0;
+    for (const item of deliveryItems) {
+        const deliveryId = get(item, "deliveryDocument", "DeliveryDocument");
+        const itemId = get(item, "deliveryDocumentItem", "DeliveryDocumentItem");
+        const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
+        const orderItemId = get(item, "referenceSdDocumentItem", "ReferenceSdDocumentItem");
+        
+        let productId = "";
+        if (orderId && orderItemId) {
+            productId = orderItemToProductMap.get(`${orderId}-${Number(orderItemId)}`) || "";
+        }
+
+        if (!deliveryId || !productId || !insertedDeliveryIds.has(deliveryId) || !seenProducts.has(productId)) continue;
+
+        await prisma.deliveryItem.upsert({
+            where: { id: `${deliveryId}-${itemId}` },
+            update: {},
+            create: {
+                id: `${deliveryId}-${itemId}`,
+                deliveryId,
+                productId,
+                quantity: Number(get(item, "actualDeliveryQuantity", "ActualDeliveryQuantity") || 0),
+            }
+        });
+        insertedDelItems++;
+        if (insertedDelItems >= 500) break;
+    }
+    console.log("Delivery Items inserted:", insertedDelItems);
+
+    // ------------------ INVOICE ITEMS ------------------
+    let insertedInvItems = 0;
+    for (const item of invoiceItems) {
+        const invoiceId = get(item, "billingDocument", "BillingDocument");
+        const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
+        const productId = get(item, "material", "Material");
+        const itemId = get(item, "billingDocumentItem", "BillingDocumentItem");
+
+        if (!invoiceId || !orderId || !productId || !insertedInvoiceIds.has(invoiceId) || !insertedOrderIds.has(orderId) || !seenProducts.has(productId)) continue;
+
+        await prisma.invoiceItem.upsert({
+            where: { id: `${invoiceId}-${itemId}` },
+            update: {},
+            create: {
+                id: `${invoiceId}-${itemId}`,
+                invoiceId,
+                orderId,
+                productId,
+                quantity: Number(get(item, "billingQuantity", "BillingQuantity") || 0),
+                netAmount: Number(get(item, "netAmount", "NetAmount") || 0),
+            }
+        });
+        insertedInvItems++;
+        if (insertedInvItems >= 500) break;
+    }
+    console.log("Invoice Items inserted:", insertedInvItems);
 
     let insertedJournals = 0;
 
