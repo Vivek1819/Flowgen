@@ -1,9 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Graph from "./components/Graph";
 
 export default function Home() {
-
   const [messages, setMessages] = useState<
     { role: "user" | "assistant"; content: string }[]
   >([]);
@@ -12,7 +11,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [lastQuery, setLastQuery] = useState("");
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -23,14 +26,12 @@ export default function Home() {
     setInput("");
     setLoading(true);
     setLastQuery(input);
-    setHighlightedIds([]); // Clear highlights when a new query starts
+    setHighlightedIds([]);
 
     try {
       const res = await fetch("/api/query", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: input }),
       });
 
@@ -45,7 +46,7 @@ export default function Home() {
       if (Array.isArray(data.highlightedIds) && data.highlightedIds.length > 0) {
         setHighlightedIds(data.highlightedIds);
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "Something went wrong" },
@@ -55,94 +56,133 @@ export default function Home() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <div className="h-12 flex items-center px-4 border-b bg-white text-sm font-medium text-gray-700">
-        Mapping / Order to Cash
-      </div>
+    <div className="h-screen flex flex-col bg-[#f8f9fb]">
+      {/* ── Header ── */}
+      <header className="h-12 flex items-center px-5 border-b border-gray-200 bg-white gap-3">
+        <div className="w-6 h-6 rounded bg-gray-900 flex items-center justify-center">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <rect x="1" y="1" width="4" height="4" rx="1" fill="white" />
+            <rect x="7" y="1" width="4" height="4" rx="1" fill="white" />
+            <rect x="1" y="7" width="4" height="4" rx="1" fill="white" />
+            <rect x="7" y="7" width="4" height="4" rx="1" fill="white" opacity="0.4" />
+          </svg>
+        </div>
+        <nav className="text-sm text-gray-500 flex items-center gap-1.5">
+          <span className="text-gray-400">Mapping</span>
+          <span className="text-gray-300">/</span>
+          <span className="font-semibold text-gray-800">Order to Cash</span>
+        </nav>
+      </header>
 
-      {/* Main */}
+      {/* ── Main ── */}
       <div className="flex flex-1 overflow-hidden">
-
         {/* Graph Panel */}
-        <div className="w-3/4 relative bg-white border-r">
-          <div className="absolute top-3 left-3 flex gap-2">
-            <button className="px-3 py-1 text-xs bg-gray-100 rounded border">
+        <div className="flex-1 relative bg-[#f8f9fb]">
+          {/* Overlay Buttons */}
+          <div className="absolute top-4 left-4 z-10 flex gap-2">
+            <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white rounded-lg border border-gray-200 text-gray-600 shadow-sm hover:shadow transition-shadow">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 8L6 4L10 8" />
+              </svg>
               Minimize
             </button>
-            <button className="px-3 py-1 text-xs bg-black text-white rounded">
-              Hide Ground Overlay
+            <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-gray-800 text-white rounded-lg shadow-sm hover:bg-gray-700 transition-colors">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" />
+              </svg>
+              Hide Granular Overlay
             </button>
           </div>
 
-          <div className="h-full flex items-center justify-center text-gray-400">
+          <div className="h-full w-full">
             <Graph query={lastQuery} highlightedIds={highlightedIds} />
           </div>
         </div>
 
-        {/* Chat Panel */}
-        <div className="w-1/4 flex flex-col bg-white">
-
+        {/* ── Chat Panel ── */}
+        <div className="w-[340px] flex flex-col bg-white border-l border-gray-200">
           {/* Chat Header */}
-          <div className="p-4 border-b">
-            <h2 className="text-sm font-semibold">Chat with Graph</h2>
-            <p className="text-xs text-gray-500">Order to Cash</p>
+          <div className="px-5 pt-5 pb-4 border-b border-gray-100">
+            <h2 className="text-[13px] font-semibold text-gray-900 tracking-tight">Chat with Graph</h2>
+            <p className="text-[11px] text-gray-400 mt-0.5">Order to Cash</p>
 
-            <div className="mt-3 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-black text-white flex items-center justify-center text-xs">
-                D
+            <div className="mt-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-gray-900 flex items-center justify-center shadow-sm">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="white">
+                  <circle cx="8" cy="5" r="3" />
+                  <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" fill="white" />
+                </svg>
               </div>
               <div>
-                <p className="text-sm font-medium">Dodge AI</p>
-                <p className="text-xs text-gray-500">
-                  Chat Agent
-                </p>
+                <p className="text-sm font-semibold text-gray-900">Dodge AI</p>
+                <p className="text-[11px] text-gray-400">Graph Agent</p>
               </div>
             </div>
 
-            <p className="text-xs text-gray-500 mt-3">
-              Hi! I can help you analyze the Order to Cash process.
+            <p className="text-[12px] text-gray-500 mt-3 leading-relaxed">
+              Hi! I can help you analyze the <span className="font-semibold text-gray-700">Order to Cash</span> process.
             </p>
           </div>
 
-
           {/* Messages */}
-          <div className="flex-1 p-4 overflow-y-auto text-sm space-y-3">
+          <div className="flex-1 px-4 py-3 overflow-y-auto space-y-3">
             {messages.length === 0 && (
-              <p className="text-gray-400">No messages yet</p>
+              <div className="flex items-center gap-2 mt-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <p className="text-[11px] text-gray-400">Dodge AI is awaiting instructions</p>
+              </div>
             )}
 
             {messages.map((msg, idx) => (
               <div
                 key={idx}
-                className={`p-2 rounded ${msg.role === "user"
-                  ? "bg-black text-white ml-auto max-w-[80%]"
-                  : "bg-gray-100 text-gray-800 max-w-[80%]"
-                  }`}
+                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl max-w-[90%] ${
+                  msg.role === "user"
+                    ? "bg-gray-900 text-white ml-auto rounded-br-md"
+                    : "bg-gray-50 text-gray-700 border border-gray-100 rounded-bl-md"
+                }`}
               >
                 {msg.content}
               </div>
             ))}
 
             {loading && (
-              <p className="text-gray-400 text-xs">Thinking...</p>
+              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gray-50 rounded-xl border border-gray-100 max-w-[90%]">
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
             )}
+
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
-          <div className="p-3 border-t">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
+          <div className="p-4 border-t border-gray-100">
+            <div className="flex items-end gap-2 bg-gray-50 rounded-xl border border-gray-200 px-3 py-2 focus-within:border-gray-400 focus-within:ring-1 focus-within:ring-gray-200 transition-all">
+              <textarea
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="Analyze anything"
-                className="flex-1 border rounded px-3 py-2 text-sm bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black"
+                className="flex-1 bg-transparent text-[13px] text-gray-800 placeholder-gray-400 resize-none focus:outline-none leading-snug"
+                style={{ minHeight: 20, maxHeight: 80 }}
               />
               <button
                 onClick={handleSend}
-                className="px-3 py-2 text-sm bg-black text-white rounded"
+                disabled={loading}
+                className="px-3 py-1.5 text-[12px] font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-40 transition-colors shrink-0"
               >
                 Send
               </button>
