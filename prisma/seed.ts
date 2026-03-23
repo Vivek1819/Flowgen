@@ -26,6 +26,21 @@ function get(obj: any, camel: string, pascal: string) {
     return obj[camel] ?? obj[pascal];
 }
 
+function cleanMetadata(obj: any) {
+    const cleaned: any = {};
+    for (const key of Object.keys(obj)) {
+        // Prefer camelCase if both exist (e.g., if key is PascalCase and the camelCase version exists, skip the PascalCase one)
+        const lowerFirst = key.charAt(0).toLowerCase() + key.slice(1);
+        
+        if (key !== lowerFirst && obj[lowerFirst] !== undefined && obj[key] === obj[lowerFirst]) {
+            continue;
+        }
+        
+        cleaned[key] = obj[key];
+    }
+    return cleaned;
+}
+
 async function main() {
     const base = "sap-o2c-data";
 
@@ -46,6 +61,16 @@ async function main() {
         path.join(base, "journal_entry_items_accounts_receivable")
     );
 
+
+    console.log("Clearing existing data...");
+    await prisma.journalEntry.deleteMany();
+    await prisma.delivery.deleteMany();
+    await prisma.payment.deleteMany();
+    await prisma.invoice.deleteMany();
+    await prisma.orderItem.deleteMany();
+    await prisma.order.deleteMany();
+    await prisma.product.deleteMany();
+    await prisma.customer.deleteMany();
 
     console.log("Loaded data");
 
@@ -101,6 +126,7 @@ async function main() {
 
     // ------------------ ORDERS ------------------
     let insertedOrders = 0;
+    const insertedOrderIds = new Set<string>();
 
     for (const o of orders) {
         const orderId = get(o, "salesOrder", "SalesOrder");
@@ -117,16 +143,11 @@ async function main() {
                 createdAt: get(o, "creationDate", "CreationDate") || "",
                 totalAmount: Number(get(o, "totalNetAmount", "TotalNetAmount") || 0),
                 deliveryStatus: get(o, "overallDeliveryStatus", "OverallDeliveryStatus") || "UNKNOWN",
-                metadata: JSON.stringify({
-                    salesOrg: get(o, "salesOrganization", "SalesOrganization"),
-                    currency: get(o, "transactionCurrency", "TransactionCurrency"),
-                    createdBy: get(o, "createdByUser", "CreatedByUser"),
-                    netAmount: get(o, "totalNetAmount", "TotalNetAmount"),
-                    deliveryStatus: get(o, "overallDeliveryStatus", "OverallDeliveryStatus"),
-                }),
+                metadata: JSON.stringify(cleanMetadata(o)),
             },
         });
 
+        insertedOrderIds.add(orderId);
         insertedOrders++;
         if (insertedOrders >= 200) break;
     }
@@ -151,11 +172,7 @@ async function main() {
                 productId: material,
                 quantity: Number(get(i, "orderQuantity", "OrderQuantity") || 0),
                 netAmount: Number(get(i, "netAmount", "NetAmount") || 0),
-                metadata: JSON.stringify({
-                    plant: get(i, "plant", "Plant"),
-                    storageLocation: get(i, "storageLocation", "StorageLocation"),
-                    currency: get(i, "transactionCurrency", "TransactionCurrency"),
-                }),
+                metadata: JSON.stringify(cleanMetadata(i)),
             },
         });
 
@@ -167,6 +184,7 @@ async function main() {
 
     // ------------------ INVOICES + JOURNAL ------------------
     let insertedInvoices = 0;
+    const insertedInvoiceIds = new Set<string>();
 
     for (const i of invoices) {
         const invoiceId = get(i, "billingDocument", "BillingDocument");
@@ -183,14 +201,11 @@ async function main() {
                 accountingDocument: get(i, "accountingDocument", "AccountingDocument") || "NA",
                 totalAmount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
                 createdAt: get(i, "creationDate", "CreationDate") || "",
-                metadata: JSON.stringify({
-                    billingType: get(i, "billingDocumentType", "BillingDocumentType"),
-                    currency: get(i, "transactionCurrency", "TransactionCurrency"),
-                    companyCode: get(i, "companyCode", "CompanyCode"),
-                    fiscalYear: get(i, "fiscalYear", "FiscalYear"),
-                }),
+                metadata: JSON.stringify(cleanMetadata(i)),
             },
         });
+
+        insertedInvoiceIds.add(invoiceId);
 
         const accDoc = get(i, "accountingDocument", "AccountingDocument");
 
@@ -203,11 +218,7 @@ async function main() {
                     invoiceId: invoiceId,
                     amount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
                     createdAt: get(i, "creationDate", "CreationDate") || "",
-                    metadata: JSON.stringify({
-                        companyCode: get(i, "companyCode", "CompanyCode"),
-                        fiscalYear: get(i, "fiscalYear", "FiscalYear"),
-                        currency: get(i, "transactionCurrency", "TransactionCurrency"),
-                    }),
+                    metadata: JSON.stringify(cleanMetadata(i)),
                 },
             });
         }
@@ -235,11 +246,7 @@ async function main() {
                 customerId,
                 amount: Number(get(p, "amountInCompanyCodeCurrency", "AmountInCompanyCodeCurrency") || 0),
                 createdAt: get(p, "postingDate", "PostingDate") || "",
-                metadata: JSON.stringify({
-                    companyCode: get(p, "companyCode", "CompanyCode"),
-                    currency: get(p, "transactionCurrency", "TransactionCurrency"),
-                    postingDate: get(p, "postingDate", "PostingDate"),
-                }),
+                metadata: JSON.stringify(cleanMetadata(p)),
             },
         });
 
@@ -260,7 +267,7 @@ async function main() {
             get(d, "referenceDocument", "ReferenceDocument") ||
             get(d, "precedingDocument", "PrecedingDocument");
 
-        if (!deliveryId) continue;
+        if (!deliveryId || !orderId || !insertedOrderIds.has(orderId)) continue;
 
         await prisma.delivery.upsert({
             where: { id: deliveryId },
@@ -272,7 +279,7 @@ async function main() {
                     get(d, "overallGoodsMovementStatus", "OverallGoodsMovementStatus") ||
                     "UNKNOWN",
 
-                ...(orderId
+                ...(orderId && insertedOrderIds.has(orderId)
                     ? {
                         order: {
                             connect: { id: orderId },
@@ -280,11 +287,7 @@ async function main() {
                     }
                     : {}),
 
-                metadata: JSON.stringify({
-                    shippingPoint: get(d, "shippingPoint", "ShippingPoint"),
-                    deliveryType: get(d, "deliveryDocumentType", "DeliveryDocumentType"),
-                    plant: get(d, "plant", "Plant"),
-                }),
+                metadata: JSON.stringify(cleanMetadata(d)),
             }
         });
 
@@ -300,7 +303,7 @@ async function main() {
         const journalId = get(j, "accountingDocument", "AccountingDocument");
         const invoiceId = get(j, "referenceDocument", "ReferenceDocument");
 
-        if (!journalId || !invoiceId) continue;
+        if (!journalId || !invoiceId || !insertedInvoiceIds.has(invoiceId)) continue;
 
         await prisma.journalEntry.upsert({
             where: { id: journalId },
@@ -313,14 +316,7 @@ async function main() {
                 ),
                 createdAt: get(j, "postingDate", "PostingDate") || "",
 
-                metadata: JSON.stringify({
-                    companyCode: get(j, "companyCode", "CompanyCode"),
-                    fiscalYear: get(j, "fiscalYear", "FiscalYear"),
-                    glAccount: get(j, "gLAccount", "GLAccount"),
-                    currency: get(j, "transactionCurrency", "TransactionCurrency"),
-                    profitCenter: get(j, "profitCenter", "ProfitCenter"),
-                    costCenter: get(j, "costCenter", "CostCenter"),
-                }),
+                metadata: JSON.stringify(cleanMetadata(j)),
             },
         });
 

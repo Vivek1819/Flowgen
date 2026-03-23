@@ -167,6 +167,16 @@ function GraphInner({ query, setSelectedNode, setPanelPosition }: { query: strin
                     });
                 });
 
+                // --- Calculate Connections ---
+                const connectionCounts: Record<string, number> = {};
+                newEdges.forEach(e => {
+                    connectionCounts[e.source] = (connectionCounts[e.source] || 0) + 1;
+                    connectionCounts[e.target] = (connectionCounts[e.target] || 0) + 1;
+                });
+                newNodes.forEach(n => {
+                    n.data.connections = connectionCounts[n.id] || 0;
+                });
+
                 setNodes(newNodes);
                 setEdges(newEdges);
             });
