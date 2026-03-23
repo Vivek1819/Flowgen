@@ -24,10 +24,19 @@ function isRelevantQuery(query: string) {
         "invoice", "invoices", "payment", "payments", "product", "products",
         "billing", "journal", "flow", "trace", "broken", "incomplete",
         "show", "highlight", "visualize", "explore", "related", "connected",
-        "find", "list", "path", "chain",
+        "find", "list", "path", "chain", "sales", "sap", "material",
+        // Conversational words
+        "tell", "talk", "about", "describe", "explain", "what", "which",
+        "how", "many", "much", "where", "top", "highest", "lowest",
+        "most", "least", "total", "amount", "count", "average",
+        "everything", "all", "detail", "details", "info", "information",
+        "status", "gap", "missing", "analyze", "analysis",
     ];
     const lower = query.toLowerCase();
-    return allowedKeywords.some((kw) => lower.includes(kw));
+    // Allow if any keyword matches OR if query contains a numeric ID (entity reference)
+    if (allowedKeywords.some((kw) => lower.includes(kw))) return true;
+    if (/\d{4,}/.test(query)) return true; // e.g. "740506" → referencing an entity
+    return false;
 }
 
 function serializeBigInt(data: any): any {
@@ -241,7 +250,7 @@ export async function POST(req: Request) {
             messages: [
                 {
                     role: "system",
-                    content: "You are a data analyst. Convert database results into a clear, concise natural language answer. If data is empty say no results were found.",
+                    content: "You are a data analyst. Convert database results into a clear, concise natural language answer. Use bullet points for listing details or multiple items. If data is empty say no results were found.",
                 },
                 {
                     role: "user",

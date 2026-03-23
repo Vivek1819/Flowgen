@@ -12,6 +12,7 @@ export default function Home() {
   const [lastQuery, setLastQuery] = useState("");
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -27,6 +28,7 @@ export default function Home() {
     setLoading(true);
     setLastQuery(input);
     setHighlightedIds([]);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     try {
       const res = await fetch("/api/query", {
@@ -144,9 +146,9 @@ export default function Home() {
             {messages.map((msg, idx) => (
               <div
                 key={idx}
-                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl max-w-[90%] ${
+                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl max-w-[90%] whitespace-pre-wrap ${
                   msg.role === "user"
-                    ? "bg-gray-900 text-white ml-auto rounded-br-md"
+                    ? "bg-gray-900 text-white ml-auto rounded-br-md text-right"
                     : "bg-gray-50 text-gray-700 border border-gray-100 rounded-bl-md"
                 }`}
               >
@@ -171,13 +173,22 @@ export default function Home() {
           <div className="p-4 border-t border-gray-100">
             <div className="flex items-end gap-2 bg-gray-50 rounded-xl border border-gray-200 px-3 py-2 focus-within:border-gray-400 focus-within:ring-1 focus-within:ring-gray-200 transition-all">
               <textarea
+                ref={textareaRef}
                 rows={1}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  // Auto-grow
+                  const ta = textareaRef.current;
+                  if (ta) {
+                    ta.style.height = "auto";
+                    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+                  }
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder="Analyze anything"
                 className="flex-1 bg-transparent text-[13px] text-gray-800 placeholder-gray-400 resize-none focus:outline-none leading-snug"
-                style={{ minHeight: 20, maxHeight: 80 }}
+                style={{ minHeight: 22, maxHeight: 120 }}
               />
               <button
                 onClick={handleSend}

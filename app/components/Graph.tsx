@@ -170,6 +170,25 @@ function GraphInner({ query, highlightedIds }: { query: string; highlightedIds: 
             });
     }, [query]);
 
+    // ── Auto-pan to highlighted nodes ──
+    useEffect(() => {
+        if (highlightedIds.length === 0 || nodes.length === 0) return;
+        const hlNodeIds = nodes
+            .filter((n) => {
+                const rawId = n.id.split("-").slice(1).join("-");
+                return highlightSet.has(rawId);
+            })
+            .map((n) => n.id);
+        if (hlNodeIds.length === 0) return;
+        setTimeout(() => {
+            fitView({
+                nodes: hlNodeIds.map((id) => ({ id })),
+                padding: 0.3,
+                duration: 600,
+            });
+        }, 100);
+    }, [highlightedIds, nodes, fitView, highlightSet]);
+
     // ── Memoized highlight overlays ──
     const highlightedNodes = useMemo(
         () =>
