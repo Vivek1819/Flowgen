@@ -50,6 +50,14 @@ function isRelevantQuery(query: string) {
     );
 }
 
+function serializeBigInt(data: any): any {
+    return JSON.parse(
+        JSON.stringify(data, (_, value) =>
+            typeof value === "bigint" ? Number(value) : value
+        )
+    );
+}
+
 export async function POST(req: Request) {
     try {
         const body = await req.json();
@@ -145,9 +153,9 @@ export async function POST(req: Request) {
                     role: "user",
                     content: `User query: ${userQuery}
 
-Database result:
-${JSON.stringify(dbResult)}
-`,
+                    Database result:
+                    ${JSON.stringify(serializeBigInt(dbResult))}
+                    `,
                 },
             ],
         });

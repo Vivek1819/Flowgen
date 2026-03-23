@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Graph from "./components/Graph";
 
 export default function Home() {
 
@@ -69,7 +70,7 @@ export default function Home() {
           </div>
 
           <div className="h-full flex items-center justify-center text-gray-400">
-            Graph Visualization Area
+            <Graph />
           </div>
         </div>
 
