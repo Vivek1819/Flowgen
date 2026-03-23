@@ -22,33 +22,37 @@ export default function Graph({ query }: { query: string }) {
                 const newNodes: any[] = [];
                 const newEdges: any[] = [];
 
-                let x = 100;
+                const spacingX = 220;
+                const startX = 100;
 
                 // Customers
-                data.customers.forEach((c: any) => {
+                data.customers.forEach((c: any, index: number) => {
                     newNodes.push({
                         id: `customer-${c.id}`,
-                        position: { x, y: 100 },
+                        position: { x: startX + index * spacingX, y: 100 },
                         data: { label: `Customer: ${c.name}` },
                         style: {
                             background: highlightCustomers ? "#000" : "#fff",
                             color: highlightCustomers ? "#fff" : "#000",
+                            border: "1px solid #ddd",
+                            padding: 10,
+                            borderRadius: 8,
                         },
                     });
-                    x += 200;
                 });
 
-                x = 100;
-
                 // Orders
-                data.orders.forEach((o: any) => {
+                data.orders.forEach((o: any, index: number) => {
                     newNodes.push({
                         id: `order-${o.id}`,
-                        position: { x, y: 250 },
+                        position: { x: startX + index * spacingX, y: 250 },
                         data: { label: `Order: ${o.id}` },
                         style: {
                             background: highlightOrders ? "#000" : "#fff",
                             color: highlightOrders ? "#fff" : "#000",
+                            border: "1px solid #ddd",
+                            padding: 10,
+                            borderRadius: 8,
                         },
                     });
 
@@ -57,21 +61,20 @@ export default function Graph({ query }: { query: string }) {
                         source: `customer-${o.customerId}`,
                         target: `order-${o.id}`,
                     });
-
-                    x += 200;
                 });
 
-                x = 100;
-
                 // Invoices
-                data.invoices.forEach((i: any) => {
+                data.invoices.forEach((i: any, index: number) => {
                     newNodes.push({
                         id: `invoice-${i.id}`,
-                        position: { x, y: 400 },
+                        position: { x: startX + index * spacingX, y: 400 },
                         data: { label: `Invoice: ${i.id}` },
                         style: {
                             background: highlightInvoices ? "#000" : "#fff",
                             color: highlightInvoices ? "#fff" : "#000",
+                            border: "1px solid #ddd",
+                            padding: 10,
+                            borderRadius: 8,
                         },
                     });
 
@@ -80,8 +83,6 @@ export default function Graph({ query }: { query: string }) {
                         source: `customer-${i.customerId}`,
                         target: `invoice-${i.id}`,
                     });
-
-                    x += 200;
                 });
 
                 setNodes(newNodes);
