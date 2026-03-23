@@ -5,10 +5,13 @@ import ReactFlow, { Background, Controls, useReactFlow } from "reactflow";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
-function GraphInner({ query, setSelectedNode, setPanelPosition }: { query: string, setSelectedNode: any, setPanelPosition: any }) {
+function GraphInner({ query, setSelectedNode, setPanelPosition, highlightedIds }: { query: string, setSelectedNode: any, setPanelPosition: any, highlightedIds: string[] }) {
     const [nodes, setNodes] = useState<any[]>([]);
     const [edges, setEdges] = useState<any[]>([]);
     const { getViewport } = useReactFlow();
+
+    // Build a Set of raw entity IDs for O(1) lookups
+    const highlightSet = new Set(highlightedIds);
 
     const handleNodeClick = (_: any, node: any) => {
         setSelectedNode(node);
@@ -182,11 +185,39 @@ function GraphInner({ query, setSelectedNode, setPanelPosition }: { query: strin
             });
     }, [query]);
 
+    // Derive highlighted nodes/edges from highlightSet on each render
+    const highlightedNodes = nodes.map(n => {
+        // Node IDs are `type-rawId`, e.g. `order-740506`
+        const rawId = n.id.split("-").slice(1).join("-");
+        const isHighlighted = highlightSet.has(rawId);
+        return {
+            ...n,
+            style: {
+                ...n.style,
+                ...(isHighlighted ? {
+                    boxShadow: "0 0 0 3px white, 0 0 16px 6px rgba(250,204,21,0.9)",
+                    zIndex: 10,
+                } : {})
+            }
+        };
+    });
+
+    const highlightedEdges = edges.map(e => {
+        const sourceRaw = e.source.split("-").slice(1).join("-");
+        const targetRaw = e.target.split("-").slice(1).join("-");
+        const isHighlighted = highlightSet.has(sourceRaw) && highlightSet.has(targetRaw);
+        return {
+            ...e,
+            style: isHighlighted ? { stroke: "#facc15", strokeWidth: 2 } : undefined,
+            animated: isHighlighted,
+        };
+    });
+
     return (
         <div className="w-full h-full">
             <ReactFlow
-                nodes={nodes}
-                edges={edges}
+                nodes={highlightedNodes}
+                edges={highlightedEdges}
                 onNodeMouseEnter={(e, node) => {
                     setSelectedNode(node);
                     setPanelPosition({
@@ -211,7 +242,7 @@ function GraphInner({ query, setSelectedNode, setPanelPosition }: { query: strin
     );
 }
 
-export default function Graph(props: { query: string, setSelectedNode: any, setPanelPosition: any }) {
+export default function Graph(props: { query: string, setSelectedNode: any, setPanelPosition: any, highlightedIds: string[] }) {
     return (
         <ReactFlowProvider>
             <GraphInner {...props} />

@@ -63,6 +63,22 @@ function serializeBigInt(data: any): any {
     );
 }
 
+// The columns in our DB result that directly correspond to graph node IDs
+const ID_COLUMNS = ["id", "orderId", "customerId", "invoiceId", "deliveryId", "paymentId", "journalId", "journalEntryId"];
+
+function extractHighlightedIds(rows: any[]): string[] {
+    const ids = new Set<string>();
+    for (const row of rows) {
+        for (const col of ID_COLUMNS) {
+            const val = row[col];
+            if (val && typeof val === "string") {
+                ids.add(val);
+            }
+        }
+    }
+    return Array.from(ids);
+}
+
 export async function POST(req: Request) {
     try {
         const body = await req.json();
@@ -134,7 +150,6 @@ export async function POST(req: Request) {
             sqlGen.choices[0]?.message?.content?.trim() || "";
 
         console.log("Generated SQL:", generatedSQL);
-        require('fs').appendFileSync('sql-logs.txt', 'SQL:\\n' + generatedSQL + '\\n\\n');
 
         if (!isSafeSQL(generatedSQL)) {
             return Response.json({
@@ -188,7 +203,9 @@ export async function POST(req: Request) {
             finalResponse.choices[0]?.message?.content ||
             "No response generated.";
 
-        return Response.json({ answer });
+        const highlightedIds = extractHighlightedIds(serializeBigInt(dbResult));
+
+        return Response.json({ answer, highlightedIds });
 
     } catch (error) {
         console.error(error);

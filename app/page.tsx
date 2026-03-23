@@ -14,6 +14,7 @@ export default function Home() {
   const [lastQuery, setLastQuery] = useState("");
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [panelPosition, setPanelPosition] = useState({ x: 0, y: 0 });
+  const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
 
 
   const handleSend = async () => {
@@ -25,6 +26,7 @@ export default function Home() {
     setInput("");
     setLoading(true);
     setLastQuery(input);
+    setHighlightedIds([]); // Clear highlights when a new query starts
 
     try {
       const res = await fetch("/api/query", {
@@ -43,6 +45,9 @@ export default function Home() {
       };
 
       setMessages((prev) => [...prev, botMessage]);
+      if (Array.isArray(data.highlightedIds) && data.highlightedIds.length > 0) {
+        setHighlightedIds(data.highlightedIds);
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -75,7 +80,7 @@ export default function Home() {
           </div>
 
           <div className="h-full flex items-center justify-center text-gray-400">
-            <Graph query={lastQuery} setSelectedNode={setSelectedNode} setPanelPosition={setPanelPosition} />
+            <Graph query={lastQuery} setSelectedNode={setSelectedNode} setPanelPosition={setPanelPosition} highlightedIds={highlightedIds} />
           </div>
         </div>
 
