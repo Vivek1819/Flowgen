@@ -84,7 +84,8 @@ export async function POST(req: Request) {
                 {
                     role: "system",
                     content: `
-                        You are an expert SQL generator.
+                        You are an expert SQL generwhat do we change here now
+                        ator.
 
                         Generate ONLY SQL queries based on the schema below.
 

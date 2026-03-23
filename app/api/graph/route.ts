@@ -4,14 +4,29 @@ const prisma = new PrismaClient();
 
 export async function GET() {
   try {
-    const customers = await prisma.customer.findMany();
-    const orders = await prisma.order.findMany();
-    const invoices = await prisma.invoice.findMany();
+    const [
+      customers,
+      orders,
+      deliveries,
+      invoices,
+      journalEntries,
+      payments,
+    ] = await Promise.all([
+      prisma.customer.findMany(),
+      prisma.order.findMany(),
+      prisma.delivery.findMany(),
+      prisma.invoice.findMany(),
+      prisma.journalEntry.findMany(),
+      prisma.payment.findMany(),
+    ]);
 
     return Response.json({
       customers,
       orders,
+      deliveries,
       invoices,
+      journalEntries,
+      payments,
     });
   } catch (error) {
     console.error(error);
