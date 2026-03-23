@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Customer {
@@ -16,14 +17,14 @@ model Customer {
 }
 
 model Order {
-  id            String @id
-  customerId    String
-  createdAt     String
-  totalAmount   Float
+  id             String @id
+  customerId     String
+  createdAt      String
+  totalAmount    Float
   deliveryStatus String
 
-  customer   Customer @relation(fields: [customerId], references: [id])
-  items      OrderItem[]
+  customer Customer @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
 }
 
 model OrderItem {
