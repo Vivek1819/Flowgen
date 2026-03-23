@@ -41,3 +41,10 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# datasets
+sap-o2c-data/
+
+#database
+*.db
+*.db-journal

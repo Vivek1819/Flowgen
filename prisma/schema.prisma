@@ -23,6 +23,8 @@ model Order {
   totalAmount    Float
   deliveryStatus String
 
+  metadata String?
+
   customer Customer @relation(fields: [customerId], references: [id])
   items    OrderItem[]
 }
@@ -34,6 +36,8 @@ model OrderItem {
   quantity  Float
   netAmount Float
 
+  metadata String?
+
   order Order @relation(fields: [orderId], references: [id])
 }
 
@@ -44,6 +48,8 @@ model Invoice {
   totalAmount        Float
   createdAt          String
 
+  metadata String?
+
   customer Customer @relation(fields: [customerId], references: [id])
 }
 
@@ -52,6 +58,8 @@ model Payment {
   customerId String
   amount     Float
   createdAt  String
+
+  metadata String?
 
   customer Customer @relation(fields: [customerId], references: [id])
 }
