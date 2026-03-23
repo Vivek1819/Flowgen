@@ -1,4 +1,7 @@
 import Groq from "groq-sdk";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY!,
@@ -43,6 +46,37 @@ export async function POST(req: Request) {
             return Response.json({
                 answer:
                     "This system only answers questions related to Order-to-Cash business data.",
+            });
+        }
+
+        const lowerQuery = userQuery.toLowerCase();
+
+        // 1. Get all customers
+        if (lowerQuery.includes("customers")) {
+            const customers = await prisma.customer.findMany();
+
+            return Response.json({
+                answer: `Found ${customers.length} customers: ${customers
+                    .map((c) => c.name)
+                    .join(", ")}`,
+            });
+        }
+
+        // 2. Get orders
+        if (lowerQuery.includes("orders")) {
+            const orders = await prisma.order.findMany();
+
+            return Response.json({
+                answer: `Found ${orders.length} orders.`,
+            });
+        }
+
+        // 3. Get invoices
+        if (lowerQuery.includes("invoices")) {
+            const invoices = await prisma.invoice.findMany();
+
+            return Response.json({
+                answer: `Found ${invoices.length} invoices.`,
             });
         }
 
