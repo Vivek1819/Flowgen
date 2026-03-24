@@ -11,6 +11,8 @@ model Customer {
   id   String @id
   name String
 
+  metadata String?
+
   orders   Order[]
   invoices Invoice[]
   payments Payment[]
@@ -35,6 +37,8 @@ model Order {
 model Product {
   id   String @id
   name String
+
+  metadata String?
 
   orderItems    OrderItem[]
   invoiceItems  InvoiceItem[]

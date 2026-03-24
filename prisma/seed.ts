@@ -121,6 +121,7 @@ async function main() {
                 get(c, "businessPartnerFullName", "BusinessPartnerFullName") ||
                 get(c, "businessPartnerName", "BusinessPartnerName") ||
                 "Unknown",
+            metadata: JSON.stringify(cleanMetadata(c)),
         });
 
         if (customerData.length >= 200) break;
@@ -141,6 +142,7 @@ async function main() {
         productData.push({
             id: material,
             name: material,
+            metadata: JSON.stringify(cleanMetadata(item)),
         });
 
         if (productData.length >= 200) break;
@@ -201,7 +203,11 @@ async function main() {
     }
 
     if (missingProductIds.size > 0) {
-        const productData = Array.from(missingProductIds).map(id => ({ id, name: id }));
+        const productData = Array.from(missingProductIds).map(id => ({ 
+            id, 
+            name: id,
+            metadata: "{}" 
+        }));
         await prisma.product.createMany({ data: productData, skipDuplicates: true });
         for (const id of missingProductIds) seenProducts.add(id);
     }
