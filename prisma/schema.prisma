@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -25,11 +25,11 @@ model Order {
 
   metadata String?
 
-  customer   Customer   @relation(fields: [customerId], references: [id])
-  items      OrderItem[]
-  invoices       Invoice[]
-  invoiceItems   InvoiceItem[]
-  deliveries     Delivery[]
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  items        OrderItem[]
+  invoices     Invoice[]
+  invoiceItems InvoiceItem[]
+  deliveries   Delivery[]
 }
 
 model Product {
@@ -59,7 +59,7 @@ model Delivery {
   status    String
   metadata  String?
 
-  order Order? @relation(fields: [orderId], references: [id])
+  order Order?         @relation(fields: [orderId], references: [id])
   items DeliveryItem[]
 }
 
@@ -94,24 +94,23 @@ model Invoice {
   createdAt          String
   metadata           String?
 
-  customer           Customer       @relation(fields: [customerId], references: [id])
-  order              Order?         @relation(fields: [orderId], references: [id])
-  journalEntries     JournalEntry[]
-  items              InvoiceItem[]
+  customer       Customer       @relation(fields: [customerId], references: [id])
+  order          Order?         @relation(fields: [orderId], references: [id])
+  journalEntries JournalEntry[]
+  items          InvoiceItem[]
 }
 
 model InvoiceItem {
-  id          String  @id
-  invoiceId   String
-  orderId     String
-  productId   String
-  quantity    Float
-  netAmount   Float
-  invoice     Invoice @relation(fields: [invoiceId], references: [id])
-  product     Product @relation(fields: [productId], references: [id])
-  order       Order   @relation(fields: [orderId], references: [id])
+  id        String  @id
+  invoiceId String
+  orderId   String
+  productId String
+  quantity  Float
+  netAmount Float
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id])
 }
-
 
 model Payment {
   id         String @id

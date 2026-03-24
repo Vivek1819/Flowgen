@@ -175,12 +175,12 @@ function extractMentionedIds(query: string): string[] {
 
 async function runGapAnalysis(): Promise<string[]> {
     const rows = await prisma.$queryRawUnsafe<any[]>(`
-        SELECT "Order".id
+        SELECT "Order"."id"
         FROM "Order"
-        LEFT JOIN "Delivery" ON "Order".id = "Delivery".orderId
-        LEFT JOIN "Invoice" ON "Order".id = "Invoice".orderId
-        LEFT JOIN "JournalEntry" ON "Invoice".id = "JournalEntry".invoiceId
-        WHERE "Delivery".id IS NULL OR "Invoice".id IS NULL
+        LEFT JOIN "Delivery" ON "Order"."id" = "Delivery"."orderId"
+        LEFT JOIN "Invoice" ON "Order"."id" = "Invoice"."orderId"
+        LEFT JOIN "JournalEntry" ON "Invoice"."id" = "JournalEntry"."invoiceId"
+        WHERE "Delivery"."id" IS NULL OR "Invoice"."id" IS NULL
         LIMIT 50
     `);
     return rows.map((r: any) => r.id);
@@ -281,34 +281,34 @@ async function runSQLQuery(userQuery: string): Promise<any[]> {
                 {
                     role: "system",
                     content: `You are an expert SQL generator for a SAP Order-to-Cash (O2C) database.
-Generate ONLY SQL queries based on the schema below for SQLite.
+Generate ONLY SQL queries based on the schema below for PostgreSQL.
 
 Schema:
-- Customer(id, name)
-- Order(id, customerId, createdAt, totalAmount, deliveryStatus)
-- OrderItem(id, orderId, productId, quantity, netAmount)
-- Product(id, name)
-- Delivery(id, orderId, createdAt, status)
-- DeliveryItem(id, deliveryId, productId, quantity)
-- Invoice(id, customerId, orderId, accountingDocument, totalAmount, createdAt)
-- InvoiceItem(id, invoiceId, orderId, productId, quantity, netAmount)
-- JournalEntry(id, invoiceId, amount, createdAt)
-- Payment(id, customerId, amount, createdAt)
+- "Customer"("id", "name")
+- "Order"("id", "customerId", "createdAt", "totalAmount", "deliveryStatus")
+- "OrderItem"("id", "orderId", "productId", "quantity", "netAmount")
+- "Product"("id", "name")
+- "Delivery"("id", "orderId", "createdAt", "status")
+- "DeliveryItem"("id", "deliveryId", "productId", "quantity")
+- "Invoice"("id", "customerId", "orderId", "accountingDocument", "totalAmount", "createdAt")
+- "InvoiceItem"("id", "invoiceId", "orderId", "productId", "quantity", "netAmount")
+- "JournalEntry"("id", "invoiceId", "amount", "createdAt")
+- "Payment"("id", "customerId", "amount", "createdAt")
 
 Synonyms:
-- "Billing Document" or "Bill" = Invoice
-- "Journal" = JournalEntry
-- "Material" = Product
 - "Sales Order" = Order
+- "Billing" = Invoice
+- "Material" = Product
 
 Rules:
-- ONLY generate exactly ONE single SQL query. Never generate multiple queries.
-- Only generate SELECT queries.
-- Do NOT explain. Do NOT include markdown, just plain SQL.
-- Wrap reserved keywords in double quotes, e.g. "Order".
+- Generate exactly ONE single SQL query. 
+- ONLY SELECT queries.
+- CRITICAL: PostgreSQL is case-sensitive for camelCase/PascalCase identifiers. 
+- ALWAYS wrap ALL table names and ALL column names in double quotes, e.g., SELECT "id" FROM "Order".
+- Use "Order"."id" style for joins to avoid ambiguity.
 - Always LIMIT 50.
-- For 'trace' or 'ONE example', use LIMIT 1.
-- For incomplete flows, use LEFT JOIN + IS NULL check.`
+- For incomplete flows, use LEFT JOIN + IS NULL check.
+- NO markdown, NO explaining, NO formatting and do not ever explain anything. just return plain SQL string.`
                 },
                 { role: "user", content: userQuery },
             ],

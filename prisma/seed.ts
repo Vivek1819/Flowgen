@@ -82,6 +82,15 @@ async function main() {
         }
     }
 
+    const deliveryToOrderMap = new Map<string, string>();
+    for (const item of deliveryItems) {
+        const delId = get(item, "deliveryDocument", "DeliveryDocument");
+        const ordId = get(item, "referenceSdDocument", "ReferenceSdDocument");
+        if (delId && ordId && !deliveryToOrderMap.has(delId)) {
+            deliveryToOrderMap.set(delId, ordId);
+        }
+    }
+
 
     console.log("Clearing existing data...");
     await prisma.journalEntry.deleteMany();
@@ -98,118 +107,88 @@ async function main() {
     console.log("Loaded data");
 
     // ------------------ CUSTOMERS ------------------
-    let insertedCustomers = 0;
+    const customerData = [];
+    const seenCustomers = new Set<string>();
 
     for (const c of customers) {
         const id = get(c, "businessPartner", "BusinessPartner");
+        if (!id || seenCustomers.has(id)) continue;
+        seenCustomers.add(id);
 
-        if (!id) continue;
-
-        await prisma.customer.upsert({
-            where: { id },
-            update: {},
-            create: {
-                id,
-                name:
-                    get(c, "businessPartnerFullName", "BusinessPartnerFullName") ||
-                    get(c, "businessPartnerName", "BusinessPartnerName") ||
-                    "Unknown",
-            },
+        customerData.push({
+            id,
+            name:
+                get(c, "businessPartnerFullName", "BusinessPartnerFullName") ||
+                get(c, "businessPartnerName", "BusinessPartnerName") ||
+                "Unknown",
         });
 
-        insertedCustomers++;
-        if (insertedCustomers >= 200) break;
+        if (customerData.length >= 200) break;
     }
 
-    console.log("Customers inserted:", insertedCustomers);
+    await prisma.customer.createMany({ data: customerData, skipDuplicates: true });
+    console.log("Customers inserted:", customerData.length);
 
     // ------------------ PRODUCTS ------------------
-    const seenProducts = new Set();
+    const productData = [];
+    const seenProducts = new Set<string>();
 
     for (const item of orderItems) {
         const material = get(item, "material", "Material");
-
         if (!material || seenProducts.has(material)) continue;
-
         seenProducts.add(material);
 
-        await prisma.product.upsert({
-            where: { id: material },
-            update: {},
-            create: {
-                id: material,
-                name: material,
-            },
+        productData.push({
+            id: material,
+            name: material,
         });
 
-        if (seenProducts.size >= 200) break;
+        if (productData.length >= 200) break;
     }
 
-    console.log("Products inserted:", seenProducts.size);
+    await prisma.product.createMany({ data: productData, skipDuplicates: true });
+    console.log("Products inserted:", productData.length);
 
     // ------------------ ORDERS ------------------
-    let insertedOrders = 0;
+    const orderData = [];
     const insertedOrderIds = new Set<string>();
 
     for (const o of orders) {
         const orderId = get(o, "salesOrder", "SalesOrder");
         const customerId = get(o, "soldToParty", "SoldToParty");
 
-        if (!orderId || !customerId) continue;
+        if (!orderId || !customerId || insertedOrderIds.has(orderId)) continue;
 
-        await prisma.order.upsert({
-            where: { id: orderId },
-            update: {},
-            create: {
-                id: orderId,
-                customerId,
-                createdAt: get(o, "creationDate", "CreationDate") || "",
-                totalAmount: Number(get(o, "totalNetAmount", "TotalNetAmount") || 0),
-                deliveryStatus: get(o, "overallDeliveryStatus", "OverallDeliveryStatus") || "UNKNOWN",
-                metadata: JSON.stringify(cleanMetadata(o)),
-            },
+        orderData.push({
+            id: orderId,
+            customerId,
+            createdAt: get(o, "creationDate", "CreationDate") || "",
+            totalAmount: Number(get(o, "totalNetAmount", "TotalNetAmount") || 0),
+            deliveryStatus: get(o, "overallDeliveryStatus", "OverallDeliveryStatus") || "UNKNOWN",
+            metadata: JSON.stringify(cleanMetadata(o)),
         });
 
         insertedOrderIds.add(orderId);
-        insertedOrders++;
-        if (insertedOrders >= 2000) break; // Insert up to 2000 orders to get good overlap
+        if (orderData.length >= 2000) break; 
     }
 
-    console.log("Orders inserted:", insertedOrders);
+    await prisma.order.createMany({ data: orderData, skipDuplicates: true });
+    console.log("Orders inserted:", orderData.length);
 
     // ------------------ DUMMY DEPENDENCIES FROM ITEMS ------------------
     console.log("Injecting missing dependencies for foreign keys...");
+
+    const missingProductIds = new Set<string>();
+    const missingOrderIds = new Set<string>();
+
     for (const item of invoiceItems) {
         const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
         const productId = get(item, "material", "Material");
 
-        if (productId && !seenProducts.has(productId)) {
-            await prisma.product.upsert({
-                where: { id: productId },
-                update: {},
-                create: { id: productId, name: productId },
-            });
-            seenProducts.add(productId);
-        }
-
-        if (orderId && !insertedOrderIds.has(orderId)) {
-            await prisma.order.upsert({
-                where: { id: orderId },
-                update: {},
-                create: {
-                    id: orderId,
-                    customerId: insertedCustomers > 0 ? customers[0].businessPartner : "UNKNOWN",
-                    createdAt: "",
-                    totalAmount: 0,
-                    deliveryStatus: "UNKNOWN",
-                    metadata: "{}"
-                },
-            });
-            insertedOrderIds.add(orderId);
-        }
+        if (productId && !seenProducts.has(productId)) missingProductIds.add(productId);
+        if (orderId && !insertedOrderIds.has(orderId)) missingOrderIds.add(orderId);
     }
 
-    // Also inject from deliveryItems
     for (const item of deliveryItems) {
         const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
         const orderItemId = get(item, "referenceSdDocumentItem", "ReferenceSdDocumentItem");
@@ -217,182 +196,143 @@ async function main() {
             ? orderItemToProductMap.get(`${orderId}-${Number(orderItemId)}`) || ""
             : "";
 
-        if (productId && !seenProducts.has(productId)) {
-            await prisma.product.upsert({
-                where: { id: productId },
-                update: {},
-                create: { id: productId, name: productId },
-            });
-            seenProducts.add(productId);
-        }
+        if (productId && !seenProducts.has(productId)) missingProductIds.add(productId);
+        if (orderId && !insertedOrderIds.has(orderId)) missingOrderIds.add(orderId);
+    }
 
-        if (orderId && !insertedOrderIds.has(orderId)) {
-            await prisma.order.upsert({
-                where: { id: orderId },
-                update: {},
-                create: {
-                    id: orderId,
-                    customerId: customers[0] ? get(customers[0], "businessPartner", "BusinessPartner") : "UNKNOWN",
-                    createdAt: "",
-                    totalAmount: 0,
-                    deliveryStatus: "UNKNOWN",
-                    metadata: "{}"
-                },
-            });
-            insertedOrderIds.add(orderId);
-        }
+    if (missingProductIds.size > 0) {
+        const productData = Array.from(missingProductIds).map(id => ({ id, name: id }));
+        await prisma.product.createMany({ data: productData, skipDuplicates: true });
+        for (const id of missingProductIds) seenProducts.add(id);
+    }
+
+    if (missingOrderIds.size > 0) {
+        const orderData = Array.from(missingOrderIds).map(id => ({
+            id,
+            customerId: customerData.length > 0 ? get(customers[0], "businessPartner", "BusinessPartner") : "UNKNOWN",
+            createdAt: "",
+            totalAmount: 0,
+            deliveryStatus: "UNKNOWN",
+            metadata: "{}"
+        }));
+        await prisma.order.createMany({ data: orderData, skipDuplicates: true });
+        for (const id of missingOrderIds) insertedOrderIds.add(id);
     }
     
     // ------------------ ORDER ITEMS ------------------
-    let insertedItems = 0;
-
+    const orderItemData = [];
     for (const i of orderItems) {
         const orderId = get(i, "salesOrder", "SalesOrder");
         const material = get(i, "material", "Material");
 
         if (!orderId || !material) continue;
+        const id = `${orderId}-${material}`;
 
-        await prisma.orderItem.upsert({
-            where: { id: `${orderId}-${material}` },
-            update: {},
-            create: {
-                id: `${orderId}-${material}`,
-                orderId,
-                productId: material,
-                quantity: Number(get(i, "orderQuantity", "OrderQuantity") || 0),
-                netAmount: Number(get(i, "netAmount", "NetAmount") || 0),
-                metadata: JSON.stringify(cleanMetadata(i)),
-            },
+        orderItemData.push({
+            id,
+            orderId,
+            productId: material,
+            quantity: Number(get(i, "orderQuantity", "OrderQuantity") || 0),
+            netAmount: Number(get(i, "netAmount", "NetAmount") || 0),
+            metadata: JSON.stringify(cleanMetadata(i)),
         });
 
-        insertedItems++;
-        if (insertedItems >= 500) break;
+        if (orderItemData.length >= 500) break;
     }
-
-    console.log("OrderItems inserted:", insertedItems);
+    await prisma.orderItem.createMany({ data: orderItemData, skipDuplicates: true });
+    console.log("OrderItems inserted:", orderItemData.length);
 
     // ------------------ INVOICES + JOURNAL ------------------
-    let insertedInvoices = 0;
+    const invoiceData = [];
+    const journalData = [];
     const insertedInvoiceIds = new Set<string>();
 
     for (const i of invoices) {
         const invoiceId = get(i, "billingDocument", "BillingDocument");
         const customerId = get(i, "soldToParty", "SoldToParty");
 
-        if (!invoiceId || !customerId) continue;
+        if (!invoiceId || !customerId || insertedInvoiceIds.has(invoiceId)) continue;
 
         const orderId = invoiceToOrderMap.get(invoiceId);
 
-        await prisma.invoice.upsert({
-            where: { id: invoiceId },
-            update: {},
-            create: {
-                id: invoiceId,
-                customerId,
-                accountingDocument: get(i, "accountingDocument", "AccountingDocument") || "NA",
-                totalAmount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
-                createdAt: get(i, "creationDate", "CreationDate") || "",
-                metadata: JSON.stringify(cleanMetadata(i)),
-                orderId: (orderId && insertedOrderIds.has(orderId)) ? orderId : null,
-            },
+        invoiceData.push({
+            id: invoiceId,
+            customerId,
+            accountingDocument: get(i, "accountingDocument", "AccountingDocument") || "NA",
+            totalAmount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
+            createdAt: get(i, "creationDate", "CreationDate") || "",
+            metadata: JSON.stringify(cleanMetadata(i)),
+            orderId: (orderId && insertedOrderIds.has(orderId)) ? orderId : null,
         });
 
         insertedInvoiceIds.add(invoiceId);
 
         const accDoc = get(i, "accountingDocument", "AccountingDocument");
-
         if (accDoc) {
-            await prisma.journalEntry.upsert({
-                where: { id: accDoc },
-                update: {},
-                create: {
-                    id: accDoc,
-                    invoiceId: invoiceId,
-                    amount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
-                    createdAt: get(i, "creationDate", "CreationDate") || "",
-                    metadata: JSON.stringify(cleanMetadata(i)),
-                },
+            journalData.push({
+                id: accDoc,
+                invoiceId: invoiceId,
+                amount: Number(get(i, "totalNetAmount", "TotalNetAmount") || 0),
+                createdAt: get(i, "creationDate", "CreationDate") || "",
+                metadata: JSON.stringify(cleanMetadata(i)),
             });
         }
 
-        insertedInvoices++;
-        if (insertedInvoices >= 1000) break;
+        if (invoiceData.length >= 1000) break;
     }
 
-    console.log("Invoices inserted:", insertedInvoices);
+    await prisma.invoice.createMany({ data: invoiceData, skipDuplicates: true });
+    await prisma.journalEntry.createMany({ data: journalData, skipDuplicates: true });
+    console.log("Invoices inserted:", invoiceData.length);
 
     // ------------------ PAYMENTS ------------------
-    let insertedPayments = 0;
-
+    const paymentData = [];
     for (const p of payments) {
         const paymentId = get(p, "accountingDocument", "AccountingDocument");
         const customerId = get(p, "customer", "Customer");
 
         if (!paymentId || !customerId) continue;
 
-        await prisma.payment.upsert({
-            where: { id: paymentId },
-            update: {},
-            create: {
-                id: paymentId,
-                customerId,
-                amount: Number(get(p, "amountInCompanyCodeCurrency", "AmountInCompanyCodeCurrency") || 0),
-                createdAt: get(p, "postingDate", "PostingDate") || "",
-                metadata: JSON.stringify(cleanMetadata(p)),
-            },
+        paymentData.push({
+            id: paymentId,
+            customerId,
+            amount: Number(get(p, "amountInCompanyCodeCurrency", "AmountInCompanyCodeCurrency") || 0),
+            createdAt: get(p, "postingDate", "PostingDate") || "",
+            metadata: JSON.stringify(cleanMetadata(p)),
         });
 
-        insertedPayments++;
-        if (insertedPayments >= 200) break;
+        if (paymentData.length >= 200) break;
     }
-
-    console.log("Payments inserted:", insertedPayments);
+    await prisma.payment.createMany({ data: paymentData, skipDuplicates: true });
+    console.log("Payments inserted:", paymentData.length);
 
     // ------------------ DELIVERIES ------------------
-    let insertedDeliveries = 0;
+    const deliveryData = [];
     const insertedDeliveryIds = new Set<string>();
 
     for (const d of deliveries) {
         const deliveryId = get(d, "deliveryDocument", "DeliveryDocument");
-
-        const orderId =
-            get(d, "referenceSDDocument", "ReferenceSDDocument") ||
-            get(d, "referenceDocument", "ReferenceDocument") ||
-            get(d, "precedingDocument", "PrecedingDocument");
+        const orderId = deliveryToOrderMap.get(deliveryId);
 
         if (!deliveryId || !orderId || !insertedOrderIds.has(orderId)) continue;
 
-        await prisma.delivery.upsert({
-            where: { id: deliveryId },
-            update: {},
-            create: {
-                id: deliveryId,
-                createdAt: get(d, "creationDate", "CreationDate") || "",
-                status:
-                    get(d, "overallGoodsMovementStatus", "OverallGoodsMovementStatus") ||
-                    "UNKNOWN",
-
-                ...(orderId && insertedOrderIds.has(orderId)
-                    ? {
-                        order: {
-                            connect: { id: orderId },
-                        },
-                    }
-                    : {}),
-
-                metadata: JSON.stringify(cleanMetadata(d)),
-            }
+        deliveryData.push({
+            id: deliveryId,
+            orderId: orderId,
+            createdAt: get(d, "creationDate", "CreationDate") || "",
+            status: get(d, "overallGoodsMovementStatus", "OverallGoodsMovementStatus") || "UNKNOWN",
+            metadata: JSON.stringify(cleanMetadata(d)),
         });
 
-        insertedDeliveries++;
         insertedDeliveryIds.add(deliveryId);
-        if (insertedDeliveries >= 1000) break;
+        if (deliveryData.length >= 1000) break;
     }
 
-    console.log("Deliveries inserted:", insertedDeliveries);
+    await prisma.delivery.createMany({ data: deliveryData, skipDuplicates: true });
+    console.log("Deliveries inserted:", deliveryData.length);
 
     // ------------------ DELIVERY ITEMS ------------------
-    let insertedDelItems = 0;
+    const delItemData = [];
     for (const item of deliveryItems) {
         const deliveryId = get(item, "deliveryDocument", "DeliveryDocument");
         const itemId = get(item, "deliveryDocumentItem", "DeliveryDocumentItem");
@@ -406,23 +346,20 @@ async function main() {
 
         if (!deliveryId || !productId || !insertedDeliveryIds.has(deliveryId) || !seenProducts.has(productId)) continue;
 
-        await prisma.deliveryItem.upsert({
-            where: { id: `${deliveryId}-${itemId}` },
-            update: {},
-            create: {
-                id: `${deliveryId}-${itemId}`,
-                deliveryId,
-                productId,
-                quantity: Number(get(item, "actualDeliveryQuantity", "ActualDeliveryQuantity") || 0),
-            }
+        delItemData.push({
+            id: `${deliveryId}-${itemId}`,
+            deliveryId,
+            productId,
+            quantity: Number(get(item, "actualDeliveryQuantity", "ActualDeliveryQuantity") || 0),
         });
-        insertedDelItems++;
-        if (insertedDelItems >= 500) break;
+
+        if (delItemData.length >= 500) break;
     }
-    console.log("Delivery Items inserted:", insertedDelItems);
+    await prisma.deliveryItem.createMany({ data: delItemData, skipDuplicates: true });
+    console.log("Delivery Items inserted:", delItemData.length);
 
     // ------------------ INVOICE ITEMS ------------------
-    let insertedInvItems = 0;
+    const invItemData = [];
     for (const item of invoiceItems) {
         const invoiceId = get(item, "billingDocument", "BillingDocument");
         const orderId = get(item, "referenceSdDocument", "ReferenceSdDocument");
@@ -431,51 +368,39 @@ async function main() {
 
         if (!invoiceId || !orderId || !productId || !insertedInvoiceIds.has(invoiceId) || !insertedOrderIds.has(orderId) || !seenProducts.has(productId)) continue;
 
-        await prisma.invoiceItem.upsert({
-            where: { id: `${invoiceId}-${itemId}` },
-            update: {},
-            create: {
-                id: `${invoiceId}-${itemId}`,
-                invoiceId,
-                orderId,
-                productId,
-                quantity: Number(get(item, "billingQuantity", "BillingQuantity") || 0),
-                netAmount: Number(get(item, "netAmount", "NetAmount") || 0),
-            }
+        invItemData.push({
+            id: `${invoiceId}-${itemId}`,
+            invoiceId,
+            orderId,
+            productId,
+            quantity: Number(get(item, "billingQuantity", "BillingQuantity") || 0),
+            netAmount: Number(get(item, "netAmount", "NetAmount") || 0),
         });
-        insertedInvItems++;
-        if (insertedInvItems >= 500) break;
+
+        if (invItemData.length >= 500) break;
     }
-    console.log("Invoice Items inserted:", insertedInvItems);
+    await prisma.invoiceItem.createMany({ data: invItemData, skipDuplicates: true });
+    console.log("Invoice Items inserted:", invItemData.length);
 
-    let insertedJournals = 0;
-
+    const journalBatchData = [];
     for (const j of journalEntries) {
         const journalId = get(j, "accountingDocument", "AccountingDocument");
         const invoiceId = get(j, "referenceDocument", "ReferenceDocument");
 
         if (!journalId || !invoiceId || !insertedInvoiceIds.has(invoiceId)) continue;
 
-        await prisma.journalEntry.upsert({
-            where: { id: journalId },
-            update: {},
-            create: {
-                id: journalId,
-                invoiceId: invoiceId,
-                amount: Number(
-                    get(j, "amountInTransactionCurrency", "AmountInTransactionCurrency") || 0
-                ),
-                createdAt: get(j, "postingDate", "PostingDate") || "",
-
-                metadata: JSON.stringify(cleanMetadata(j)),
-            },
+        journalBatchData.push({
+            id: journalId,
+            invoiceId: invoiceId,
+            amount: Number(get(j, "amountInTransactionCurrency", "AmountInTransactionCurrency") || 0),
+            createdAt: get(j, "postingDate", "PostingDate") || "",
+            metadata: JSON.stringify(cleanMetadata(j)),
         });
 
-        insertedJournals++;
-        if (insertedJournals >= 200) break;
+        if (journalBatchData.length >= 200) break;
     }
-
-    console.log("Journal Entries inserted:", insertedJournals);
+    await prisma.journalEntry.createMany({ data: journalBatchData, skipDuplicates: true });
+    console.log("Journal Entries inserted:", journalBatchData.length);
 
     console.log("🔥 FULL GRAPH DATA SEEDED");
 }
