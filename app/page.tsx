@@ -115,7 +115,7 @@ export default function Home() {
         </div>
 
         {/* ── Chat Panel ── */}
-        <div className="w-[340px] flex flex-col bg-white border-l border-gray-200">
+        <div className="w-[420px] flex flex-col bg-white border-l border-gray-200">
           {/* Chat Header */}
           <div className="px-5 pt-5 pb-4 border-b border-gray-100">
             <h2 className="text-[13px] font-semibold text-gray-900 tracking-tight">Chat with Graph</h2>
@@ -151,10 +151,10 @@ export default function Home() {
             {messages.map((msg, idx) => (
               <div
                 key={idx}
-                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl max-w-[90%] whitespace-pre-wrap ${
+                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl whitespace-pre-wrap ${
                   msg.role === "user"
-                    ? "bg-gray-900 text-white ml-auto rounded-br-md text-right"
-                    : "bg-gray-50 text-gray-700 border border-gray-100 rounded-bl-md"
+                    ? "bg-gray-900 text-white ml-auto rounded-br-md w-fit max-w-[85%]"
+                    : "bg-gray-50 text-gray-700 border border-gray-100 rounded-bl-md max-w-[90%]"
                 }`}
               >
                 {msg.content}

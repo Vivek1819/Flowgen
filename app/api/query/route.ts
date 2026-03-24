@@ -74,10 +74,12 @@ async function classifyIntent(query: string): Promise<QueryIntent> {
             {
                 role: "system",
                 content: `Classify the user's query into exactly ONE of these intents:
-- "flow_trace": user wants to see/trace the full document flow chain (e.g. "trace order X", "show full flow", "what happened to invoice Y", "follow this order")
-- "entity_explore": user wants to see all entities related to a specific named entity (e.g. "show everything related to customer 310000108", "what is order 740506 connected to")
-- "gap_analysis": user wants to find broken/missing/incomplete flows (e.g. "broken flows", "delivered but not billed", "orders with no invoice", "incomplete")
-- "sql": anything else — ranking, aggregation, counting, listing, normal data questions
+- "flow_trace": user wants to trace a SPECIFIC document's full lifecycle chain (e.g. "trace order 740506", "show full flow for invoice 123", "follow order 740506")
+- "entity_explore": user wants to see what a SPECIFIC entity (by ID) is connected to (e.g. "show everything related to customer 310000108", "what is order 740506 connected to")
+- "gap_analysis": user wants to find broken/missing/incomplete flows (e.g. "broken flows", "delivered but not billed", "orders with no invoice")
+- "sql": anything else — listing all entities of a type, ranking, aggregation, counting, showing, normal data questions
+
+IMPORTANT: If the user asks to "show all", "list", "highlight all", or "display" a TYPE of entity (e.g. "show me all products", "highlight customers", "list all orders"), that is "sql" NOT "entity_explore". Entity explore requires a SPECIFIC ID.
 
 Respond with ONLY the intent string, nothing else.`
             },
@@ -239,7 +241,7 @@ export async function POST(req: Request) {
         } else if (intent === "gap_analysis") {
             const gapIds = await runGapAnalysis();
             seedIds = gapIds.slice(0, 10);
-            highlightedIds = gapIds.length > 0 ? await traverseGraph(gapIds.slice(0, 10)) : [];
+            highlightedIds = gapIds.length > 0 ? await traverseGraph(gapIds.slice(0, 10), 1) : [];
         }
 
         // ── STEP 3: Always run SQL for the text answer ───────────────────────
