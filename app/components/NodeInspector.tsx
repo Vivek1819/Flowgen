@@ -20,7 +20,8 @@ export default function NodeInspector({
         delivery: "Delivery",
         invoice: "Invoice",
         journal: "Journal Entry",
-        payment: "Payment"
+        payment: "Payment",
+        product: "Product (Material)"
     };
 
     const title = titles[type] || type;

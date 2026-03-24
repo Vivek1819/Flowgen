@@ -11,6 +11,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [lastQuery, setLastQuery] = useState("");
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
+  const [seedIds, setSeedIds] = useState<string[]>([]);
+  const [highlightMode, setHighlightMode] = useState<"nodes_only" | "flow">("nodes_only");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -28,6 +30,7 @@ export default function Home() {
     setLoading(true);
     setLastQuery(input);
     setHighlightedIds([]);
+    setSeedIds([]);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     try {
@@ -47,6 +50,8 @@ export default function Home() {
       setMessages((prev) => [...prev, botMessage]);
       if (Array.isArray(data.highlightedIds) && data.highlightedIds.length > 0) {
         setHighlightedIds(data.highlightedIds);
+        setSeedIds(data.seedIds || []);
+        setHighlightMode(data.highlightMode || "nodes_only");
       }
     } catch {
       setMessages((prev) => [
@@ -105,7 +110,7 @@ export default function Home() {
           </div>
 
           <div className="h-full w-full">
-            <Graph query={lastQuery} highlightedIds={highlightedIds} />
+            <Graph query={lastQuery} highlightedIds={highlightedIds} seedIds={seedIds} highlightMode={highlightMode} />
           </div>
         </div>
 

@@ -108,20 +108,26 @@ async function traverseGraph(seedIds: string[], maxHops = 2): Promise<string[]> 
                 prisma.invoice.findMany({ where: { customerId: id }, select: { id: true, customerId: true, orderId: true } }),
                 prisma.payment.findMany({ where: { customerId: id }, select: { id: true, customerId: true } }),
 
-                // Order → Customer, Deliveries, Invoices
+                // Order → Customer, Deliveries, Invoices, Products
                 prisma.order.findFirst({ where: { id }, select: { id: true, customerId: true } })
                     .then(o => o ? [o] : []),
                 prisma.delivery.findMany({ where: { orderId: id }, select: { id: true, orderId: true } }),
                 prisma.invoice.findMany({ where: { orderId: id }, select: { id: true, orderId: true, customerId: true } }),
+                prisma.orderItem.findMany({ where: { orderId: id }, select: { productId: true } }),
 
                 // Invoice → Order, Customer, JournalEntries
                 prisma.invoice.findFirst({ where: { id }, select: { id: true, orderId: true, customerId: true } })
                     .then(i => i ? [i] : []),
                 prisma.journalEntry.findMany({ where: { invoiceId: id }, select: { id: true, invoiceId: true } }),
 
-                // Delivery → Order
+                // Delivery → Order, Products
                 prisma.delivery.findFirst({ where: { id }, select: { id: true, orderId: true } })
                     .then(d => d ? [d] : []),
+                prisma.deliveryItem.findMany({ where: { deliveryId: id }, select: { productId: true } }),
+
+                // Product → Orders, Deliveries
+                prisma.orderItem.findMany({ where: { productId: id }, select: { orderId: true } }),
+                prisma.deliveryItem.findMany({ where: { productId: id }, select: { deliveryId: true } }),
 
                 // JournalEntry → Invoice
                 prisma.journalEntry.findFirst({ where: { id }, select: { id: true, invoiceId: true } })
@@ -210,6 +216,7 @@ export async function POST(req: Request) {
         console.log("Intent:", intent);
 
         let highlightedIds: string[] = [];
+        let seedIds: string[] = [];
         let dbResultForAnswer: any[] = [];
 
         // ── STEP 2: Graph-mode branch (flow_trace / entity_explore / gap_analysis) ─
@@ -217,20 +224,21 @@ export async function POST(req: Request) {
             const mentionedIds = extractMentionedIds(userQuery);
             console.log("Mentioned IDs:", mentionedIds);
 
-            const hops = intent === "flow_trace" ? 2 : 1; // entity_explore = immediate neighbors only
+            const hops = intent === "flow_trace" ? 2 : 1;
 
             if (mentionedIds.length > 0) {
+                seedIds = mentionedIds;
                 highlightedIds = await traverseGraph(mentionedIds, hops);
             } else {
-                // No IDs found in text — use SQL to find them first, then traverse
                 const sqlRows = await runSQLQuery(userQuery);
-                const seedIds = extractHighlightedIds(sqlRows);
-                highlightedIds = seedIds.length > 0 ? await traverseGraph(seedIds, hops) : [];
+                const extracted = extractHighlightedIds(sqlRows);
+                seedIds = extracted;
+                highlightedIds = extracted.length > 0 ? await traverseGraph(extracted, hops) : [];
                 dbResultForAnswer = sqlRows;
             }
         } else if (intent === "gap_analysis") {
             const gapIds = await runGapAnalysis();
-            // Expand each broken order to show its full partial chain
+            seedIds = gapIds.slice(0, 10);
             highlightedIds = gapIds.length > 0 ? await traverseGraph(gapIds.slice(0, 10)) : [];
         }
 
@@ -261,7 +269,11 @@ export async function POST(req: Request) {
 
         const answer = formatted.choices[0]?.message?.content || "No response generated.";
 
-        return Response.json({ answer, highlightedIds, intent });
+        const highlightMode = (intent === "flow_trace" || intent === "entity_explore" || intent === "gap_analysis")
+            ? "flow"
+            : "nodes_only";
+
+        return Response.json({ answer, highlightedIds, seedIds, intent, highlightMode });
 
     } catch (error) {
         console.error(error);
@@ -284,16 +296,16 @@ async function runSQLQuery(userQuery: string): Promise<any[]> {
 Generate ONLY SQL queries based on the schema below for PostgreSQL.
 
 Schema:
-- "Customer"("id", "name")
-- "Order"("id", "customerId", "createdAt", "totalAmount", "deliveryStatus")
-- "OrderItem"("id", "orderId", "productId", "quantity", "netAmount")
-- "Product"("id", "name")
-- "Delivery"("id", "orderId", "createdAt", "status")
-- "DeliveryItem"("id", "deliveryId", "productId", "quantity")
-- "Invoice"("id", "customerId", "orderId", "accountingDocument", "totalAmount", "createdAt")
-- "InvoiceItem"("id", "invoiceId", "orderId", "productId", "quantity", "netAmount")
-- "JournalEntry"("id", "invoiceId", "amount", "createdAt")
-- "Payment"("id", "customerId", "amount", "createdAt")
+- "Customer"("id" TEXT, "name" TEXT)
+- "Order"("id" TEXT, "customerId" TEXT, "createdAt" TEXT, "totalAmount" NUMERIC, "deliveryStatus" TEXT)
+- "OrderItem"("id" TEXT, "orderId" TEXT, "productId" TEXT, "quantity" NUMERIC, "netAmount" NUMERIC)
+- "Product"("id" TEXT, "name" TEXT)
+- "Delivery"("id" TEXT, "orderId" TEXT, "createdAt" TEXT, "status" TEXT)
+- "DeliveryItem"("id" TEXT, "deliveryId" TEXT, "productId" TEXT, "quantity" NUMERIC)
+- "Invoice"("id" TEXT, "customerId" TEXT, "orderId" TEXT, "accountingDocument" TEXT, "totalAmount" NUMERIC, "createdAt" TEXT)
+- "InvoiceItem"("id" TEXT, "invoiceId" TEXT, "orderId" TEXT, "productId" TEXT, "quantity" NUMERIC, "netAmount" NUMERIC)
+- "JournalEntry"("id" TEXT, "invoiceId" TEXT, "amount" NUMERIC, "createdAt" TEXT)
+- "Payment"("id" TEXT, "customerId" TEXT, "amount" NUMERIC, "createdAt" TEXT)
 
 Synonyms:
 - "Sales Order" = Order
@@ -303,12 +315,11 @@ Synonyms:
 Rules:
 - Generate exactly ONE single SQL query. 
 - ONLY SELECT queries.
-- CRITICAL: PostgreSQL is case-sensitive for camelCase/PascalCase identifiers. 
-- ALWAYS wrap ALL table names and ALL column names in double quotes, e.g., SELECT "id" FROM "Order".
-- Use "Order"."id" style for joins to avoid ambiguity.
+- CRITICAL: PostgreSQL is case-sensitive. ALWAYS double-quote ALL table and column names.
+- CRITICAL: ALL "id" columns are TEXT type. Always wrap ID values in single quotes, e.g. WHERE "Order"."id" = '740516'.
 - Always LIMIT 50.
 - For incomplete flows, use LEFT JOIN + IS NULL check.
-- NO markdown, NO explaining, NO formatting and do not ever explain anything. just return plain SQL string.`
+- Return ONLY the raw SQL string. No markdown, no explanation.`
                 },
                 { role: "user", content: userQuery },
             ],
