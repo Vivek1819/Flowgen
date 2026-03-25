@@ -62,13 +62,46 @@ The system uses an `isSafeSQL` helper that strictly permits only `SELECT` statem
 
 ---
 
+## 📊 Dataset Setup
+
+The project requires a specific SAP O2C dataset to function correctly. This dataset is not included in the repository due to size.
+
+1. **Download the Dataset**: [Click here to download (Google Drive)](https://drive.google.com/file/d/1UqaLbFaveV-3MEuiUrzKydhKmkeC1iAL/view?usp=sharing)
+2. **Extract**: Unzip the contents into the `sap-o2c-data/` directory at the root of the project.
+3. **Verify Structure**: Ensure you have subdirectories like `business_partners`, `sales_order_headers`, etc., inside `sap-o2c-data/`, and each contains `.jsonl` files.
+
+---
+
 ## 🚦 Getting Started
 
-### Installation
-1. `npm install`
-2. Configure `.env.local` with `DATABASE_URL` and `GROQ_API_KEY`.
-3. `npx prisma db push`
-4. `npm run dev`
+### Installation & Setup
+
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
+
+2. **Environment Variables**:
+   Create a `.env.local` file and add your keys:
+   ```env
+   DATABASE_URL="file:./dev.db" # Or your PostgreSQL URL
+   GROQ_API_KEY="your_groq_api_key_here"
+   ```
+
+3. **Initialize Database**:
+   ```bash
+   npx prisma db push
+   ```
+
+4. **Seed Data**:
+   ```bash
+   npx prisma db seed
+   ```
+
+5. **Run Development Server**:
+   ```bash
+   npm run dev
+   ```
 
 ---
 

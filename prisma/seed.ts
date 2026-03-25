@@ -44,6 +44,12 @@ function cleanMetadata(obj: any) {
 async function main() {
     const base = "sap-o2c-data";
 
+    if (!fs.existsSync(base)) {
+        console.error(`❌ Error: Dataset directory "${base}" not found.`);
+        console.error(`Please download the dataset and extract it into "${base}/" as described in the README.`);
+        process.exit(1);
+    }
+
     const customers = readAllJSONLFromFolder(path.join(base, "business_partners"));
     const orders = readAllJSONLFromFolder(path.join(base, "sales_order_headers"));
     const orderItems = readAllJSONLFromFolder(path.join(base, "sales_order_items"));
