@@ -14,8 +14,6 @@ export default function Home() {
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
   const [seedIds, setSeedIds] = useState<string[]>([]);
   const [highlightMode, setHighlightMode] = useState<"nodes_only" | "flow">("nodes_only");
-  
-  // UI Controls
   const [chatVisible, setChatVisible] = useState(true);
   const [showInspector, setShowInspector] = useState(true);
 
@@ -26,14 +24,16 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const [status, setStatus] = useState("");
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
     const userMessage = { role: "user" as const, content: input };
-
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
+    setStatus("Thinking...");
     setLastQuery(input);
     setHighlightedIds([]);
     setSeedIds([]);
@@ -49,26 +49,66 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
+      if (!res.body) throw new Error("No response body");
 
-      const botMessage = {
-        role: "assistant" as const,
-        content: data.answer,
+      const reader = res.body.getReader();
+      const decoder = new TextEncoder();
+      let assistantMessage = "";
+      
+      // Add initial empty assistant message
+      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+      const processChunk = (chunk: string) => {
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.type === "status") {
+              setStatus(data.content);
+            } else if (data.type === "answer_chunk") {
+              assistantMessage += data.content;
+              setStatus(""); // Clear status once we start getting the answer
+              setMessages((prev) => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1].content = assistantMessage;
+                return newMessages;
+              });
+            } else if (data.type === "metadata") {
+              if (Array.isArray(data.highlightedIds)) {
+                setHighlightedIds(data.highlightedIds);
+                setSeedIds(data.seedIds || []);
+                setHighlightMode(data.highlightMode || "nodes_only");
+              }
+            } else if (data.type === "error") {
+               setMessages((prev) => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1].content = data.content;
+                return newMessages;
+              });
+            }
+          } catch (e) {
+            console.error("Error parsing chunk", e);
+          }
+        }
       };
 
-      setMessages((prev) => [...prev, botMessage]);
-      if (Array.isArray(data.highlightedIds) && data.highlightedIds.length > 0) {
-        setHighlightedIds(data.highlightedIds);
-        setSeedIds(data.seedIds || []);
-        setHighlightMode(data.highlightMode || "nodes_only");
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = new TextDecoder().decode(value);
+        processChunk(chunk);
       }
-    } catch {
+
+    } catch (err) {
+      console.error(err);
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "Something went wrong" },
       ]);
     } finally {
       setLoading(false);
+      setStatus("");
     }
   };
 
@@ -198,12 +238,17 @@ export default function Home() {
               ))}
 
               {loading && (
-                <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gray-50 rounded-xl border border-gray-100 max-w-[90%]">
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                <div className="flex flex-col gap-2 max-w-[90%]">
+                  <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gray-50 rounded-xl border border-gray-100 w-fit">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </div>
                   </div>
+                  {status && (
+                    <p className="text-[11px] text-gray-400 ml-1 animate-pulse italic">{status}</p>
+                  )}
                 </div>
               )}
 

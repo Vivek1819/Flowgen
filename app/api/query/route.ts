@@ -77,7 +77,7 @@ function formatHistory(history: { role: string; content: string }[]) {
 async function extractEntityNames(query: string, history: any[]): Promise<{ name: string; type: "customer" | "product" | "order" }[]> {
     try {
         const res = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
+            model: "llama-3.1-8b-instant",
             messages: [
                 {
                     role: "system",
@@ -215,7 +215,7 @@ function extractMentionedIds(query: string): string[] {
 async function selectRelevantEntities(query: string, intent: string, dbResult: any[]): Promise<{ seeds: string[], highlights: string[] }> {
     try {
         const res = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile", 
+            model: "llama-3.1-8b-instant", 
             messages: [
                 {
                     role: "system",
@@ -291,9 +291,10 @@ Schema:
 Rules:
 1. Generate exactly ONE single SQL query. 
 2. ONLY SELECT queries.
-3. PostgreSQL is case-sensitive. ALWAYS double-quote ALL table and column names.
+3. PostgreSQL is case-sensitive. ALWAYS double-quote ALL table and column names (e.g. "Order"."totalAmount", "Customer"."name").
 4. ALL "id" columns are TEXT. Wrap ID values in single quotes.
-5. CRITICAL: JOIN clauses MUST come BEFORE WHERE clauses.
+5. ALL camelCase columns (like "totalAmount", "customerId", "orderId") MUST be double-quoted.
+6. CRITICAL: JOIN clauses MUST come BEFORE WHERE clauses.
 6. MANDATORY: ALWAYS select the "id" columns for every table you JOIN or FROM (e.g. "Customer"."id", "Order"."id") so they can be highlighted on the graph.
 7. CRITICAL RELATIONS: 
    - "Order"."customerId" = "Customer"."id"
@@ -307,7 +308,8 @@ Rules:
 11. Always LIMIT 50.
 12. IMPORTANT: When joining multiple tables, ALWAYS use explicit aliases for ID columns to avoid name collisions (e.g. SELECT "Customer"."id" AS "customerId", "Order"."id" AS "orderId").
 13. CONTEXT RESOLUTION: If the user query uses pronouns like "it", "this", "those", or "that customer", refer to the provided Conversation History to identify the target entity.
-14. Return ONLY raw SQL string. No markdown code blocks. ${formatHistory(history)}`;
+14. Return ONLY raw SQL string. NO MARKDOWN. NO EXPLANATIONS. NO TRIPLE BACKTICKS. NO INTRODUCTORY TEXT.
+15. IF YOU ADD ANY TEXT OTHER THAN THE SQL QUERY, THE SYSTEM WILL FAIL. ${formatHistory(history)}`;
 
             let userPrompt = userQuery;
             if (lastError) {
@@ -325,9 +327,31 @@ Ensure all identifiers are double-quoted.`;
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt },
                 ],
+                temperature: 0, // Ensure consistency
             });
 
-            const sql = sqlGen.choices[0]?.message?.content?.trim().replace(/```sql|```/g, "") || "";
+            let sql = sqlGen.choices[0]?.message?.content?.trim() || "";
+            
+            // Clean up backticks or explanations if the 8b model ignored instructions
+            if (sql.includes("```")) {
+                const match = sql.match(/```(?:sql)?([\s\S]*?)```/);
+                if (match) sql = match[1].trim();
+            }
+            
+            // If it still has multiple lines and one starts with SELECT, try to isolate it
+            if (sql.toLowerCase().includes("select") && (sql.includes("Explanation") || sql.includes("Here is"))) {
+                const lines = sql.split("\n");
+                const selectLine = lines.find(l => l.trim().toLowerCase().startsWith("select"));
+                if (selectLine) {
+                    // Try to find the full query block
+                    const startIndex = sql.toLowerCase().indexOf("select");
+                    const endIndex = sql.indexOf(";", startIndex);
+                    if (endIndex !== -1) {
+                        sql = sql.substring(startIndex, endIndex + 1).trim();
+                    }
+                }
+            }
+
             if (!sql) return { rows: [], sql: "" };
             lastSQL = sql;
             console.log("SQL Attempt " + attempts + ": " + sql);
@@ -353,101 +377,132 @@ Ensure all identifiers are double-quoted.`;
 }
 
 export async function POST(req: Request) {
-    try {
-        const body = await req.json();
-        const userQuery = body?.query?.trim();
-        const history = body?.history || [];
+    const encoder = new TextEncoder();
+    
+    const stream = new ReadableStream({
+        async start(controller) {
+            const send = (data: any) => {
+                controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+            };
 
-        if (!userQuery) {
-            return Response.json({ answer: "Please enter a valid query." });
-        }
+            try {
+                const body = await req.json();
+                const userQuery = body?.query?.trim();
+                const history = body?.history || [];
 
-        if (!isRelevantQuery(userQuery)) {
-            return Response.json({
-                answer: "This system only answers questions related to Order-to-Cash business data.",
-            });
-        }
-
-        const intent = await classifyIntent(userQuery, history);
-        console.log("Intent: " + intent);
-
-        let lastSQL = "";
-
-        const mentionedIds = extractMentionedIds(userQuery);
-        
-        // --- Smart NER Step ---
-        const potentialEntities = await extractEntityNames(userQuery, history);
-        const resolvedIds = await resolveEntities(potentialEntities);
-        // ----------------------
-
-        let highlightedIds: string[] = [];
-        let seedIds: string[] = Array.from(new Set([...mentionedIds, ...resolvedIds]));
-        let dbResultForAnswer: any[] = [];
-
-        // ── STEP 2: Main Logic ───────────────────────────────────────────────
-        if (intent === "gap_analysis") {
-            const gapIds = await runGapAnalysis();
-            dbResultForAnswer = [{ message: "Found potential gaps in these representative entities", entities: gapIds }];
-            seedIds = gapIds.slice(0, 5);
-            // For gap analysis, we want to see the immediate context of these gaps
-            highlightedIds = await traverseGraph(seedIds, 1);
-        } else {
-            // Run SQL
-            const sqlResult = await runSQLQuery(userQuery, history);
-            dbResultForAnswer = sqlResult.rows;
-            lastSQL = sqlResult.sql;
-            
-            // Extract ALL IDs from the result rows to ensure we don't miss anything in the flow
-            const extractedIds = extractHighlightedIds(dbResultForAnswer);
-            console.log(`Extracted ${extractedIds.length} IDs from database results`);
-
-            // Intelligent Filtering — Let LLM choose what's actually relevant
-            const filtered = await selectRelevantEntities(userQuery, intent, dbResultForAnswer);
-            console.log("Smart Highlighting (LLM):", filtered);
-
-            if (filtered.seeds.length > 0 || extractedIds.length > 0) {
-                // Combine mentioned, resolved, LLM seeds, and extracted IDs
-                seedIds = Array.from(new Set([...mentionedIds, ...resolvedIds, ...filtered.seeds]));
-                
-                // ALWAYS include extractedIds in highlightedIds for both flow_trace and sql intent to ensure everything in search result is lit up
-                const llmHighlights = filtered.highlights;
-                highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights, ...extractedIds]));
-
-                if (intent !== "flow_trace" && llmHighlights.length === 0 && extractedIds.length === 0) {
-                    // Fallback to 1-hop if we had seedIds but no context from SQL or LLM
-                    highlightedIds = await traverseGraph(seedIds, 1);
+                if (!userQuery) {
+                    send({ type: "error", content: "Please enter a valid query." });
+                    controller.close();
+                    return;
                 }
-            } else {
-                // TOTAL FALLBACK: If SQL returned 0 rows and LLM failed, use mentioned IDs
-                console.log("SQL returned 0 rows, falling back to mentioned IDs:", mentionedIds);
-                seedIds = mentionedIds;
-                highlightedIds = mentionedIds.length > 0 ? await traverseGraph(mentionedIds, 1) : [];
-            }
-        }
 
-        const formatted = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-                {
-                    role: "system",
-                    content: `You are a data analyst. Convert database results into a clear, concise natural language answer. 
+                if (!isRelevantQuery(userQuery)) {
+                    send({ type: "error", content: "This system only answers questions related to Order-to-Cash business data." });
+                    controller.close();
+                    return;
+                }
+
+                // 1. Intent Classification
+                send({ type: "status", content: "Classifying intent..." });
+                const intent = await classifyIntent(userQuery, history);
+                console.log("Intent: " + intent);
+
+                // 2. Entity Resolution
+                send({ type: "status", content: "Resolving entities..." });
+                const mentionedIds = extractMentionedIds(userQuery);
+                const potentialEntities = await extractEntityNames(userQuery, history);
+                const resolvedIds = await resolveEntities(potentialEntities);
+
+                let highlightedIds: string[] = [];
+                let seedIds: string[] = Array.from(new Set([...mentionedIds, ...resolvedIds]));
+                let dbResultForAnswer: any[] = [];
+                let lastSQL = "";
+
+                // 3. Main Data Fetching
+                if (intent === "gap_analysis") {
+                    send({ type: "status", content: "Running gap analysis..." });
+                    const gapIds = await runGapAnalysis();
+                    dbResultForAnswer = [{ message: "Found potential gaps in these representative entities", entities: gapIds }];
+                    seedIds = gapIds.slice(0, 5);
+                    highlightedIds = await traverseGraph(seedIds, 1);
+                } else {
+                    send({ type: "status", content: "Generating SQL..." });
+                    const sqlResult = await runSQLQuery(userQuery, history);
+                    dbResultForAnswer = sqlResult.rows;
+                    lastSQL = sqlResult.sql;
+                    
+                    const extractedIds = extractHighlightedIds(dbResultForAnswer);
+                    
+                    send({ type: "status", content: "Optimizing graph visualization..." });
+                    const filtered = await selectRelevantEntities(userQuery, intent, dbResultForAnswer);
+
+                    if (filtered.seeds.length > 0 || extractedIds.length > 0) {
+                        seedIds = Array.from(new Set([...mentionedIds, ...resolvedIds, ...filtered.seeds]));
+                        const llmHighlights = filtered.highlights;
+                        highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights, ...extractedIds]));
+
+                        if (intent !== "flow_trace" && llmHighlights.length === 0 && extractedIds.length === 0) {
+                            highlightedIds = await traverseGraph(seedIds, 1);
+                        }
+                    } else {
+                        seedIds = mentionedIds;
+                        highlightedIds = mentionedIds.length > 0 ? await traverseGraph(mentionedIds, 1) : [];
+                    }
+                }
+
+                // 4. Stream LLM Answer
+                send({ type: "status", content: "Generating response..." });
+                
+                const responseStream = await groq.chat.completions.create({
+                    model: "llama-3.1-8b-instant",
+                    messages: [
+                        {
+                            role: "system",
+                            content: `You are a data analyst. Convert database results into a clear, concise natural language answer. 
 Use bullet points for listing details. Mention IDs clearly so the user knows what was found on the graph.
 Use the Conversation History to understand context and avoid repetition.${formatHistory(history)}`,
-                },
-                {
-                    role: "user",
-                    content: "User query: " + userQuery + "\n\nDatabase result:\n" + JSON.stringify(serializeBigInt(dbResultForAnswer)),
-                },
-            ],
-        });
+                        },
+                        {
+                            role: "user",
+                            content: "User query: " + userQuery + "\n\nDatabase result:\n" + JSON.stringify(serializeBigInt(dbResultForAnswer)),
+                        },
+                    ],
+                    stream: true,
+                });
 
-        const answer = formatted.choices[0]?.message?.content || "No response generated.";
-        const highlightMode = (intent === "flow_trace" || intent === "gap_analysis") ? "flow" as const : "nodes_only" as const;
+                send({ type: "answer_start" });
+                for await (const chunk of responseStream) {
+                    const content = chunk.choices[0]?.delta?.content || "";
+                    if (content) {
+                        send({ type: "answer_chunk", content });
+                    }
+                }
 
-        return Response.json({ answer, highlightedIds, seedIds, intent, highlightMode });
+                // 5. Final Metadata
+                const highlightMode = (intent === "flow_trace" || intent === "gap_analysis") ? "flow" : "nodes_only";
+                send({ 
+                    type: "metadata", 
+                    highlightedIds, 
+                    seedIds, 
+                    intent, 
+                    highlightMode 
+                });
 
-    } catch (error) {
-        console.error(error);
-        return Response.json({ answer: "Error processing request" });
-    }
+                controller.close();
+            } catch (error: any) {
+                console.error("Stream Error:", error);
+                send({ type: "error", content: "Error processing request: " + error.message });
+                controller.close();
+            }
+        }
+    });
+
+    return new Response(stream, {
+        headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    });
 }
+
