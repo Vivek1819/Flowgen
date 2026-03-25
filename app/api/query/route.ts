@@ -7,10 +7,7 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY!,
 });
 
-// ─────────────────────────────────────────────
 // Helpers
-// ─────────────────────────────────────────────
-
 function isSafeSQL(sql: string) {
     const lower = sql.toLowerCase().trim();
     if (!lower.startsWith("select")) return false;
@@ -25,7 +22,6 @@ function isRelevantQuery(query: string) {
         "billing", "journal", "flow", "trace", "broken", "incomplete",
         "show", "highlight", "visualize", "explore", "related", "connected",
         "find", "list", "path", "chain", "sales", "sap", "material",
-        // Conversational words
         "tell", "talk", "about", "describe", "explain", "what", "which",
         "how", "many", "much", "where", "top", "highest", "lowest",
         "most", "least", "total", "amount", "count", "average",
@@ -33,9 +29,8 @@ function isRelevantQuery(query: string) {
         "status", "gap", "missing", "analyze", "analysis",
     ];
     const lower = query.toLowerCase();
-    // Allow if any keyword matches OR if query contains a numeric ID (entity reference)
     if (allowedKeywords.some((kw) => lower.includes(kw))) return true;
-    if (/\d{4,}/.test(query)) return true; // e.g. "740506" → referencing an entity
+    if (/\d{4,}/.test(query)) return true; 
     return false;
 }
 
@@ -47,24 +42,27 @@ function serializeBigInt(data: any): any {
     );
 }
 
-// The columns in our DB result that correspond to graph node IDs
-const ID_COLUMNS = ["id", "orderId", "customerId", "invoiceId", "deliveryId", "paymentId", "journalId", "journalEntryId"];
+const ID_COLUMNS = ["id", "orderId", "customerId", "invoiceId", "deliveryId", "paymentId", "journalId", "journalEntryId", "productId"];
 
 function extractHighlightedIds(rows: any[]): string[] {
     const ids = new Set<string>();
-    for (const row of rows) {
+    const rowsArray = Array.isArray(rows) ? rows : [];
+    for (const row of rowsArray) {
+        if (!row || typeof row !== 'object') continue;
         for (const col of ID_COLUMNS) {
             const val = row[col];
             if (val && typeof val === "string") ids.add(val);
+        }
+        for (const val of Object.values(row)) {
+            if (typeof val === "string" && (/^[SB]\d{10,}/i.test(val) || /^\d{6,}$/.test(val))) {
+                ids.add(val);
+            }
         }
     }
     return Array.from(ids);
 }
 
-// ─────────────────────────────────────────────
 // Intent Classification
-// ─────────────────────────────────────────────
-
 type QueryIntent = "sql" | "flow_trace" | "entity_explore" | "gap_analysis";
 
 async function classifyIntent(query: string): Promise<QueryIntent> {
@@ -74,12 +72,10 @@ async function classifyIntent(query: string): Promise<QueryIntent> {
             {
                 role: "system",
                 content: `Classify the user's query into exactly ONE of these intents:
-- "flow_trace": user wants to trace a SPECIFIC document's full lifecycle chain (e.g. "trace order 740506", "show full flow for invoice 123", "follow order 740506")
-- "entity_explore": user wants to see what a SPECIFIC entity (by ID) is connected to (e.g. "show everything related to customer 310000108", "what is order 740506 connected to")
-- "gap_analysis": user wants to find broken/missing/incomplete flows (e.g. "broken flows", "delivered but not billed", "orders with no invoice")
-- "sql": anything else — listing all entities of a type, ranking, aggregation, counting, showing, normal data questions
-
-IMPORTANT: If the user asks to "show all", "list", "highlight all", or "display" a TYPE of entity (e.g. "show me all products", "highlight customers", "list all orders"), that is "sql" NOT "entity_explore". Entity explore requires a SPECIFIC ID.
+- "flow_trace": user wants to trace a SPECIFIC document's full lifecycle chain (e.g. "trace order 740506", "show full flow for invoice 123")
+- "entity_explore": user wants to see what a SPECIFIC entity (by ID) is connected to (e.g. "show everything related to customer 310000108")
+- "gap_analysis": user wants to find broken/missing/incomplete flows (e.g. "broken flows", "delivered but not billed")
+- "sql": listing all entities, ranking, aggregation, counting, or normal data questions.
 
 Respond with ONLY the intent string, nothing else.`
             },
@@ -91,10 +87,7 @@ Respond with ONLY the intent string, nothing else.`
     return valid.includes(raw) ? raw : "sql";
 }
 
-// ─────────────────────────────────────────────
-// Graph Traversal Engine (BFS across O2C graph)
-// ─────────────────────────────────────────────
-
+// Graph Traversal Engine
 async function traverseGraph(seedIds: string[], maxHops = 2): Promise<string[]> {
     const collected = new Set<string>(seedIds);
     const toExpand = [...seedIds];
@@ -105,39 +98,21 @@ async function traverseGraph(seedIds: string[], maxHops = 2): Promise<string[]> 
 
         await Promise.all(batch.map(async (id) => {
             const results = await Promise.allSettled([
-                // Customer → Orders, Invoices, Payments
                 prisma.order.findMany({ where: { customerId: id }, select: { id: true, customerId: true } }),
                 prisma.invoice.findMany({ where: { customerId: id }, select: { id: true, customerId: true, orderId: true } }),
                 prisma.payment.findMany({ where: { customerId: id }, select: { id: true, customerId: true } }),
-
-                // Order → Customer, Deliveries, Invoices, Products
-                prisma.order.findFirst({ where: { id }, select: { id: true, customerId: true } })
-                    .then(o => o ? [o] : []),
+                prisma.order.findFirst({ where: { id }, select: { id: true, customerId: true } }).then(o => o ? [o] : []),
                 prisma.delivery.findMany({ where: { orderId: id }, select: { id: true, orderId: true } }),
                 prisma.invoice.findMany({ where: { orderId: id }, select: { id: true, orderId: true, customerId: true } }),
                 prisma.orderItem.findMany({ where: { orderId: id }, select: { productId: true } }),
-
-                // Invoice → Order, Customer, JournalEntries
-                prisma.invoice.findFirst({ where: { id }, select: { id: true, orderId: true, customerId: true } })
-                    .then(i => i ? [i] : []),
+                prisma.invoice.findFirst({ where: { id }, select: { id: true, orderId: true, customerId: true } }).then(i => i ? [i] : []),
                 prisma.journalEntry.findMany({ where: { invoiceId: id }, select: { id: true, invoiceId: true } }),
-
-                // Delivery → Order, Products
-                prisma.delivery.findFirst({ where: { id }, select: { id: true, orderId: true } })
-                    .then(d => d ? [d] : []),
+                prisma.delivery.findFirst({ where: { id }, select: { id: true, orderId: true } }).then(d => d ? [d] : []),
                 prisma.deliveryItem.findMany({ where: { deliveryId: id }, select: { productId: true } }),
-
-                // Product → Orders, Deliveries
                 prisma.orderItem.findMany({ where: { productId: id }, select: { orderId: true } }),
                 prisma.deliveryItem.findMany({ where: { productId: id }, select: { deliveryId: true } }),
-
-                // JournalEntry → Invoice
-                prisma.journalEntry.findFirst({ where: { id }, select: { id: true, invoiceId: true } })
-                    .then(j => j ? [j] : []),
-
-                // Payment → Customer
-                prisma.payment.findFirst({ where: { id }, select: { id: true, customerId: true } })
-                    .then(p => p ? [p] : []),
+                prisma.journalEntry.findFirst({ where: { id }, select: { id: true, invoiceId: true } }).then(j => j ? [j] : []),
+                prisma.payment.findFirst({ where: { id }, select: { id: true, customerId: true } }).then(p => p ? [p] : []),
             ]);
 
             for (const result of results) {
@@ -154,32 +129,64 @@ async function traverseGraph(seedIds: string[], maxHops = 2): Promise<string[]> 
             }
         }));
     }
-
     return Array.from(collected);
 }
 
-// ─────────────────────────────────────────────
-// Extract entity IDs mentioned in query text
-// ─────────────────────────────────────────────
-
 function extractMentionedIds(query: string): string[] {
-    // Match numeric IDs (SAP order/invoice/customer IDs), e.g. 740506, 90504219, 310000108
-    // Also match product/material codes like S8907367008620
     const patterns = [
-        /\b\d{6,}\b/g,                     // long numeric IDs (orders, invoices, customers)
-        /\b[SB]\d{13}\b/g,                  // SAP material codes
+        /\b\d{6,}\b/g,                     
+        /\b[SB]\d{10,}\b/gi,               
     ];
     const found = new Set<string>();
     for (const pattern of patterns) {
         const matches = query.match(pattern) || [];
-        for (const m of matches) found.add(m);
+        for (const m of matches) found.add(m.toUpperCase()); 
     }
     return Array.from(found);
 }
 
 // ─────────────────────────────────────────────
-// Gap Analysis — find incomplete flow orders
+// Intelligent Filtering — pick nodes to highlight
 // ─────────────────────────────────────────────
+
+async function selectRelevantEntities(query: string, intent: string, dbResult: any[]): Promise<{ seeds: string[], highlights: string[] }> {
+    try {
+        const res = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile", 
+            messages: [
+                {
+                    role: "system",
+                    content: `You are a graph visualization assistant. Given a user query and the database results, identify the MOST RELEVANT entities (IDs) to highlight.
+
+Categories:
+- "seeds": The direct "Answer Entities" (e.g., if asked "Which customers...", these ARE the Customers). These are the source of the visualization.
+- "highlights": Contextual entities like Products, Orders, or Deliveries that connect the seeds together or explain their relationship.
+
+Rules:
+1. Return ONLY a JSON object: {"seeds": ["ID1", "ID2"], "highlights": ["ID3", "ID4"]}.
+2. CRITICAL: If the user asks for a TYPE (e.g., "Which customers"), you MUST include the IDs of those customers in "seeds".
+3. Only use IDs present in the results.
+4. If there are many results (>15), only pick the top/most representative ones.`
+                },
+                {
+                    role: "user",
+                    content: `User Query: ${query}\nIntent: ${intent}\nResults (JSON): ${JSON.stringify(serializeBigInt(dbResult)).slice(0, 5000)}`
+                }
+            ],
+            response_format: { type: "json_object" }
+        });
+
+        const content = JSON.parse(res.choices[0]?.message?.content || "{}");
+        // Normalize IDs to uppercase
+        const seeds = (content.seeds || []).map((id: string) => id.toUpperCase());
+        const highlights = (content.highlights || []).map((id: string) => id.toUpperCase());
+        
+        return { seeds, highlights };
+    } catch (err) {
+        console.error("Filtering error:", err);
+        return { seeds: [], highlights: [] };
+    }
+}
 
 async function runGapAnalysis(): Promise<string[]> {
     const rows = await prisma.$queryRawUnsafe<any[]>(`
@@ -187,16 +194,89 @@ async function runGapAnalysis(): Promise<string[]> {
         FROM "Order"
         LEFT JOIN "Delivery" ON "Order"."id" = "Delivery"."orderId"
         LEFT JOIN "Invoice" ON "Order"."id" = "Invoice"."orderId"
-        LEFT JOIN "JournalEntry" ON "Invoice"."id" = "JournalEntry"."invoiceId"
         WHERE "Delivery"."id" IS NULL OR "Invoice"."id" IS NULL
         LIMIT 50
     `);
     return rows.map((r: any) => r.id);
 }
 
-// ─────────────────────────────────────────────
-// Main POST handler
-// ─────────────────────────────────────────────
+async function runSQLQuery(userQuery: string): Promise<any[]> {
+    let attempts = 0;
+    let lastError = "";
+    let lastSQL = "";
+
+    while (attempts < 2) {
+        attempts++;
+        try {
+            const systemPrompt = `You are an expert SQL generator for a SAP Order-to-Cash (O2C) database.
+Generate ONLY SQL queries based on the schema below for PostgreSQL.
+
+Schema:
+- "Customer"("id" TEXT, "name" TEXT)
+- "Order"("id" TEXT, "customerId" TEXT, "createdAt" TEXT, "totalAmount" NUMERIC, "deliveryStatus" TEXT)
+- "OrderItem"("id" TEXT, "orderId" TEXT, "productId" TEXT, "quantity" NUMERIC, "netAmount" NUMERIC)
+- "Product"("id" TEXT, "name" TEXT)
+- "Delivery"("id" TEXT, "orderId" TEXT, "createdAt" TEXT, "status" TEXT)
+- "DeliveryItem"("id" TEXT, "deliveryId" TEXT, "productId" TEXT, "quantity" NUMERIC)
+- "Invoice"("id" TEXT, "customerId" TEXT, "orderId" TEXT, "accountingDocument" TEXT, "totalAmount" NUMERIC, "createdAt" TEXT)
+- "InvoiceItem"("id" TEXT, "invoiceId" TEXT, "orderId" TEXT, "productId" TEXT, "quantity" NUMERIC, "netAmount" NUMERIC)
+- "JournalEntry"("id" TEXT, "invoiceId" TEXT, "amount" NUMERIC, "createdAt" TEXT)
+- "Payment"("id" TEXT, "customerId" TEXT, "amount" NUMERIC, "createdAt" TEXT)
+
+Rules:
+1. Generate exactly ONE single SQL query. 
+2. ONLY SELECT queries.
+3. PostgreSQL is case-sensitive. ALWAYS double-quote ALL table and column names.
+4. ALL "id" columns are TEXT. Wrap ID values in single quotes.
+5. CRITICAL: JOIN clauses MUST come BEFORE WHERE clauses.
+6. MANDATORY: ALWAYS select the "id" columns for every table you JOIN or FROM (e.g. "Customer"."id", "Order"."id") so they can be highlighted on the graph.
+7. CRITICAL: Use LEFT JOIN when asked to "trace" or "show flow" for a specific ID to ensure the query doesn't return 0 rows if some documents in the chain are missing.
+8. Use ILIKE for case-insensitive text search.
+9. Always LIMIT 50.
+10. Return ONLY raw SQL string. No markdown code blocks.`;
+
+            let userPrompt = userQuery;
+            if (lastError) {
+                userPrompt = `The previous SQL query failed with error: "${lastError}".
+Original SQL was: ${lastSQL}
+
+PLEASE FIX THE SYNTAX. 
+Common fix: If you have a JOIN, make sure it comes BEFORE the WHERE clause. 
+Ensure all identifiers are double-quoted.`;
+            }
+
+            const sqlGen = await groq.chat.completions.create({
+                model: "llama-3.3-70b-versatile",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt },
+                ],
+            });
+
+            const sql = sqlGen.choices[0]?.message?.content?.trim().replace(/```sql|```/g, "") || "";
+            if (!sql) return [];
+            lastSQL = sql;
+            console.log("SQL Attempt " + attempts + ": " + sql);
+
+            if (!isSafeSQL(sql)) return [];
+
+            const result = await prisma.$queryRawUnsafe<any[]>(sql);
+            const rows = Array.isArray(result) ? result : [];
+            
+            if (rows.length === 0 && attempts === 1) {
+                 lastError = "No results found. Try a more relaxed search using ILIKE or check ID prefixes.";
+                 continue;
+            }
+
+            return rows;
+        } catch (err: any) {
+            console.error("SQL Error Attempt " + attempts + ": " + err.message);
+            lastError = err.message;
+            if (attempts >= 2) return [];
+        }
+    }
+    return [];
+}
 
 export async function POST(req: Request) {
     try {
@@ -213,132 +293,69 @@ export async function POST(req: Request) {
             });
         }
 
-        // ── STEP 1: Classify intent ──────────────────────────────────────────
         const intent = await classifyIntent(userQuery);
-        console.log("Intent:", intent);
+        console.log("Intent: " + intent);
 
+        const mentionedIds = extractMentionedIds(userQuery);
+        
         let highlightedIds: string[] = [];
-        let seedIds: string[] = [];
+        let seedIds: string[] = [...mentionedIds];
         let dbResultForAnswer: any[] = [];
 
-        // ── STEP 2: Graph-mode branch (flow_trace / entity_explore / gap_analysis) ─
-        if (intent === "flow_trace" || intent === "entity_explore") {
-            const mentionedIds = extractMentionedIds(userQuery);
-            console.log("Mentioned IDs:", mentionedIds);
-
-            const hops = intent === "flow_trace" ? 2 : 1;
-
-            if (mentionedIds.length > 0) {
-                seedIds = mentionedIds;
-                highlightedIds = await traverseGraph(mentionedIds, hops);
-            } else {
-                const sqlRows = await runSQLQuery(userQuery);
-                const extracted = extractHighlightedIds(sqlRows);
-                seedIds = extracted;
-                highlightedIds = extracted.length > 0 ? await traverseGraph(extracted, hops) : [];
-                dbResultForAnswer = sqlRows;
-            }
-        } else if (intent === "gap_analysis") {
+        // ── STEP 2: Main Logic ───────────────────────────────────────────────
+        if (intent === "gap_analysis") {
             const gapIds = await runGapAnalysis();
-            seedIds = gapIds.slice(0, 10);
-            highlightedIds = gapIds.length > 0 ? await traverseGraph(gapIds.slice(0, 10), 1) : [];
-        }
-
-        // ── STEP 3: Always run SQL for the text answer ───────────────────────
-        if (dbResultForAnswer.length === 0) {
+            dbResultForAnswer = [{ message: "Found potential gaps in these representative entities", entities: gapIds }];
+            seedIds = gapIds.slice(0, 5);
+            highlightedIds = await traverseGraph(seedIds, 1);
+        } else {
+            // Run SQL
             dbResultForAnswer = await runSQLQuery(userQuery);
+            
+            // Intelligent Filtering — Let LLM choose what's actually relevant
+            const filtered = await selectRelevantEntities(userQuery, intent, dbResultForAnswer);
+            console.log("Smart Highlighting:", filtered);
+
+            if (filtered.seeds.length > 0 || dbResultForAnswer.length > 0) {
+                seedIds = Array.from(new Set([...mentionedIds, ...filtered.seeds]));
+                const llmHighlights = filtered.highlights;
+                
+                if (llmHighlights.length > 0) {
+                    // Trust the LLM's specific path
+                    highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights]));
+                } else {
+                    // Fallback to 1-hop if LLM gave no context
+                    highlightedIds = await traverseGraph(seedIds, 1);
+                }
+            } else {
+                // TOTAL FALLBACK: If SQL returned 0 rows and LLM failed, use mentioned IDs
+                console.log("SQL returned 0 rows, falling back to mentioned IDs:", mentionedIds);
+                seedIds = mentionedIds;
+                highlightedIds = mentionedIds.length > 0 ? await traverseGraph(mentionedIds, 1) : [];
+            }
         }
 
-        // For pure SQL mode, also extract IDs from result to highlight
-        if (intent === "sql" && highlightedIds.length === 0) {
-            highlightedIds = extractHighlightedIds(serializeBigInt(dbResultForAnswer));
-        }
-
-        // ── STEP 4: LLM formats the final answer ─────────────────────────────
         const formatted = await groq.chat.completions.create({
             model: "llama-3.3-70b-versatile",
             messages: [
                 {
                     role: "system",
-                    content: "You are a data analyst. Convert database results into a clear, concise natural language answer. Use bullet points for listing details or multiple items. If data is empty say no results were found.",
+                    content: "You are a data analyst. Convert database results into a clear, concise natural language answer. Use bullet points for listing details. Mention IDs clearly so the user knows what was found on the graph.",
                 },
                 {
                     role: "user",
-                    content: `User query: ${userQuery}\n\nDatabase result:\n${JSON.stringify(serializeBigInt(dbResultForAnswer))}`,
+                    content: "User query: " + userQuery + "\n\nDatabase result:\n" + JSON.stringify(serializeBigInt(dbResultForAnswer)),
                 },
             ],
         });
 
         const answer = formatted.choices[0]?.message?.content || "No response generated.";
-
-        const highlightMode = (intent === "flow_trace" || intent === "entity_explore" || intent === "gap_analysis")
-            ? "flow"
-            : "nodes_only";
+        const highlightMode = (intent === "flow_trace" || intent === "gap_analysis") ? "flow" as const : "nodes_only" as const;
 
         return Response.json({ answer, highlightedIds, seedIds, intent, highlightMode });
 
     } catch (error) {
         console.error(error);
         return Response.json({ answer: "Error processing request" });
-    }
-}
-
-// ─────────────────────────────────────────────
-// SQL sub-routine (shared between modes)
-// ─────────────────────────────────────────────
-
-async function runSQLQuery(userQuery: string): Promise<any[]> {
-    try {
-        const sqlGen = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-                {
-                    role: "system",
-                    content: `You are an expert SQL generator for a SAP Order-to-Cash (O2C) database.
-Generate ONLY SQL queries based on the schema below for PostgreSQL.
-
-Schema:
-- "Customer"("id" TEXT, "name" TEXT)
-- "Order"("id" TEXT, "customerId" TEXT, "createdAt" TEXT, "totalAmount" NUMERIC, "deliveryStatus" TEXT)
-- "OrderItem"("id" TEXT, "orderId" TEXT, "productId" TEXT, "quantity" NUMERIC, "netAmount" NUMERIC)
-- "Product"("id" TEXT, "name" TEXT)
-- "Delivery"("id" TEXT, "orderId" TEXT, "createdAt" TEXT, "status" TEXT)
-- "DeliveryItem"("id" TEXT, "deliveryId" TEXT, "productId" TEXT, "quantity" NUMERIC)
-- "Invoice"("id" TEXT, "customerId" TEXT, "orderId" TEXT, "accountingDocument" TEXT, "totalAmount" NUMERIC, "createdAt" TEXT)
-- "InvoiceItem"("id" TEXT, "invoiceId" TEXT, "orderId" TEXT, "productId" TEXT, "quantity" NUMERIC, "netAmount" NUMERIC)
-- "JournalEntry"("id" TEXT, "invoiceId" TEXT, "amount" NUMERIC, "createdAt" TEXT)
-- "Payment"("id" TEXT, "customerId" TEXT, "amount" NUMERIC, "createdAt" TEXT)
-
-Synonyms:
-- "Sales Order" = Order
-- "Billing" = Invoice
-- "Material" = Product
-
-Rules:
-- Generate exactly ONE single SQL query. 
-- ONLY SELECT queries.
-- CRITICAL: PostgreSQL is case-sensitive. ALWAYS double-quote ALL table and column names.
-- CRITICAL: ALL "id" columns are TEXT type. Always wrap ID values in single quotes, e.g. WHERE "Order"."id" = '740516'.
-- Always LIMIT 50.
-- For incomplete flows, use LEFT JOIN + IS NULL check.
-- Return ONLY the raw SQL string. No markdown, no explanation.`
-                },
-                { role: "user", content: userQuery },
-            ],
-        });
-
-        const sql = sqlGen.choices[0]?.message?.content?.trim() || "";
-        console.log("Generated SQL:", sql);
-
-        if (!isSafeSQL(sql)) return [];
-
-        const safeSQL = sql.replace(/\s+/g, " ").trim();
-        const result = await prisma.$queryRawUnsafe<any[]>(safeSQL);
-        const rows = Array.isArray(result) ? result.slice(0, 25) : [];
-        console.log("DB rows:", rows.length);
-        return rows;
-    } catch (err) {
-        console.error("SQL error:", err);
-        return [];
     }
 }
