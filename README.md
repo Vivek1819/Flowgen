@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FlowGen: Technical Deep Dive & Architecture
 
-## Getting Started
+**FlowGen** is an AI-powered Graph Intelligence platform for SAP Order-to-Cash (O2C) data. This document outlines the core architecture decisions and technical strategies that power the system.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 🏗️ Architecture Decisions
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 1. Decoupled Pipeline (Intent -> SQL -> Graph)
+Instead of a single monolithic LLM call, FlowGen uses a multi-stage pipeline:
+- **Phase 1: Intent Classification**: Identifies if the user is tracing a flow, exploring an entity, or asking a general data question. This reduces the search space for the next phase.
+- **Phase 2: Semantic SQL Generation**: Translates business logic into raw PostgreSQL commands.
+- **Phase 3: Contextual Augmentation**: A recursive graph traversal engine expands the result set to include historically relevant entities (e.g., pulling in a Product node just because it was part of an Order).
+- **Phase 4: Multi-Modal Answer**: Streams a natural language answer while simultaneously rendering an interactive React Flow graph.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2. Zero-Latency Streaming (SSE)
+We chose **Server-Sent Events (SSE)** via Next.js `ReadableStream` to solve the "black box" problem of long-running LLM tasks. Users receive immediate feedback through "Status Chunks" (e.g., *Classifying intent...*) while the backend performs heavy SQL generation and graph traversal.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 🗄️ Database Choice & Schema
 
-To learn more about Next.js, take a look at the following resources:
+### Why PostgreSQL?
+We opted for **PostgreSQL** (via Prisma) over specialized Graph databases (like Neo4j) for several reasons:
+- **Data Integrity**: SAP O2C data is inherently relational and strictly typed. PostgreSQL's ACID compliance is non-negotiable for billing and payment data.
+- **Flexible Search**: Using ILIKE and PostgreSQL's powerful JOIN capabilities allowed us to implement "Graph-like" behavior without the overhead of a dedicated GQL layer.
+- **Recursive Ability**: Our custom traversal logic simulates graph-native multi-hop queries using efficient Prisma lookups.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### The Schema
+The schema is modeled after real SAP ERP tables:
+- `Customer`, `Order`, `Delivery`, `Invoice`, `JournalEntry`, `Payment`.
+- **Relationships**: A cascading hierarchy from Sales to Cash, allowing for automated "Flow Tracing" across identifiers.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 🤖 LLM Prompting Strategy
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 1. Model Tiering
+- **Llama 3.3 70B (Versatile)**: Used for Intent Classification and SQL Generation. Its higher reasoning capabilities ensure that complex JOINs and double-quoting rules are followed accurately.
+- **Llama 3.1 8B (Instant)**: Used for rapid Entity Extraction, Graph Filtering, and final Answer streaming to minimize latency and cost.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 2. Self-Correcting SQL Loop
+The SQL generator is wrapped in a **retry-and-fix mechanism**:
+- If the generated SQL fails (e.g., a syntax error or missing quotes), the error message is fed back into the LLM in a second "Repair" prompt.
+- This dramatically increases the reliability of the "Text-to-SQL" feature for non-technical users.
+
+### 3. Smart Graph Filtering
+To prevent "Graph Hairballs" (too many nodes), we use a specific LLM pass that reviews the database results and selects only the **most relevant "Seeds" and "Highlights"** for visualization.
+
+---
+
+## 🛡️ Guardrails
+
+### 1. Hardcoded Keyword Filtering
+The system implements a `isRelevantQuery` check that validates the presence of O2C-specific keywords (e.g., *order, invoice, flow, gap*).
+
+### 2. Semantic Domain Bounding
+The Intent Classifier is prompted to reject any query that does not fall into the four defined business intents. If a user asks about the weather or general trivia, the system returns a polite refusal based on domain constraints.
+
+### 3. SQL Safety Layer
+The system uses an `isSafeSQL` helper that strictly permits only `SELECT` statements, explicitly blocking destructive commands like `DROP`, `DELETE`, or `UPDATE`.
+
+---
+
+## 🚦 Getting Started
+
+### Installation
+1. `npm install`
+2. Configure `.env.local` with `DATABASE_URL` and `GROQ_API_KEY`.
+3. `npx prisma db push`
+4. `npm run dev`
+
+---
+
+Developed for the **Forward Deployed Engineer** assignment.
