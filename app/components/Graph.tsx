@@ -71,9 +71,10 @@ interface GraphInnerProps {
     highlightedIds: string[];
     seedIds: string[];
     highlightMode: "nodes_only" | "flow";
+    showInspector: boolean;
 }
 
-function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInnerProps) {
+function GraphInner({ query, highlightedIds, seedIds, highlightMode, showInspector }: GraphInnerProps) {
     const [nodes, setNodes] = useState<any[]>([]);
     const [edges, setEdges] = useState<any[]>([]);
     const [selectedNode, setSelectedNode] = useState<any>(null);
@@ -189,24 +190,29 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
     // Auto-pan to highlighted nodes
     useEffect(() => {
         if (highlightedIds.length === 0 || nodes.length === 0) return;
+
+        // Collect all React Flow node IDs that match our highlighted IDs
         const hlNodeIds = nodes
             .filter((n) => {
                 const rawId = n.id.split("-").slice(1).join("-").toUpperCase();
                 return highlightSet.has(rawId);
             })
             .map((n) => n.id);
+
+        if (hlNodeIds.length === 0) return;
+
         const timer = setTimeout(() => {
             fitView({
                 nodes: hlNodeIds.map((id) => ({ id })),
-                padding: 0.2, // Snug zoom
-                duration: 800,
-                minZoom: 0.1,
-                maxZoom: 1.5, // Don't zoom in TOO much on single nodes
+                padding: 0.35, // Slightly more padding for better visibility
+                duration: 1000,
+                minZoom: 0.2,
+                maxZoom: 1.2,
             });
-        }, 300); // Wait for animations/rendering to settle
+        }, 400); // 400ms to allow layout/render to settle
 
         return () => clearTimeout(timer);
-    }, [highlightedIds, nodes, fitView, highlightSet]);
+    }, [highlightedIds, nodes.length, fitView, highlightSet]); // Added nodes.length for stability
 
     // ── Node highlights: seed / highlighted / dimmed ──
     const highlightedNodes = useMemo(
@@ -285,7 +291,7 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
                     }}
                 />
             </ReactFlow>
-            <NodeInspector node={selectedNode} position={panelPosition} />
+            {showInspector && <NodeInspector node={selectedNode} position={panelPosition} />}
         </div>
     );
 }

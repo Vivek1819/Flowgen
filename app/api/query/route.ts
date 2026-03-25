@@ -63,10 +63,18 @@ function extractHighlightedIds(rows: any[]): string[] {
 }
 
 // ─────────────────────────────────────────────
+// Updated Helper: History Formatting
+// ─────────────────────────────────────────────
+function formatHistory(history: { role: string; content: string }[]) {
+    if (!history || history.length === 0) return "";
+    return "\n\nConversation History:\n" + history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
+}
+
+// ─────────────────────────────────────────────
 // Smart Entity Resolution (NER + DB Lookup)
 // ─────────────────────────────────────────────
 
-async function extractEntityNames(query: string): Promise<{ name: string; type: "customer" | "product" | "order" }[]> {
+async function extractEntityNames(query: string, history: any[]): Promise<{ name: string; type: "customer" | "product" | "order" }[]> {
     try {
         const res = await groq.chat.completions.create({
             model: "llama-3.3-70b-versatile",
@@ -75,9 +83,9 @@ async function extractEntityNames(query: string): Promise<{ name: string; type: 
                     role: "system",
                     content: `Extract potential entity names and their types from the user query.
 Types: "customer", "product", "order".
-Ignore generic words. Focus on proper names or specific IDs if they look like names.
+Use the conversation history if the current query uses pronouns like "its", "that", "those".
 Example: "Melton Group" -> {"entities": [{"name": "Melton Group", "type": "customer"}]}
-Return ONLY a JSON object: {"entities": [{"name": "string", "type": "customer|product|order"}]}.`
+Return ONLY a JSON object: {"entities": [{"name": "string", "type": "customer|product|order"}]}.${formatHistory(history)}`
                 },
                 { role: "user", content: query }
             ],
@@ -120,7 +128,7 @@ async function resolveEntities(entities: { name: string; type: string }[]): Prom
 // Intent Classification
 type QueryIntent = "sql" | "flow_trace" | "entity_explore" | "gap_analysis";
 
-async function classifyIntent(query: string): Promise<QueryIntent> {
+async function classifyIntent(query: string, history: any[]): Promise<QueryIntent> {
     const res = await groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
         messages: [
@@ -132,7 +140,7 @@ async function classifyIntent(query: string): Promise<QueryIntent> {
 - "gap_analysis": user wants to find broken/missing/incomplete flows (e.g. "broken flows", "delivered but not billed")
 - "sql": listing all entities, ranking, aggregation, counting, or normal data questions.
 
-Respond with ONLY the intent string, nothing else.`
+Respond with ONLY the intent string, nothing else.${formatHistory(history)}`
             },
             { role: "user", content: query }
         ],
@@ -257,7 +265,7 @@ async function runGapAnalysis(): Promise<string[]> {
     return rows.map((r: any) => r.id);
 }
 
-async function runSQLQuery(userQuery: string): Promise<{ rows: any[], sql: string }> {
+async function runSQLQuery(userQuery: string, history: any[]): Promise<{ rows: any[], sql: string }> {
     let attempts = 0;
     let lastError = "";
     let lastSQL = "";
@@ -294,12 +302,12 @@ Rules:
    - "JournalEntry"."invoiceId" = "Invoice"."id"
    - "Delivery"."orderId" = "Order"."id"
 8. CRITICAL: Use LEFT JOIN when asked to "trace" or "show flow" for a specific ID to ensure the query doesn't return 0 rows if some documents in the chain are missing.
-9. JOIN MINIMIZATION: Only JOIN tables that are absolutely necessary to answer the question. For example, if asked about Customer and Products, do NOT join Delivery, Invoice, or Payment tables unless specifically requested. Over-joining with INNER JOIN will cause 0 results if one part of the flow is missing.
+9. JOIN MINIMIZATION: Only JOIN tables that are absolutely necessary to answer the question.
 10. Use ILIKE for case-insensitive text search.
 11. Always LIMIT 50.
-12. CRITICAL: If you are answering a "How many" or "List" query, you MUST still SELECT the "id" columns of ALL entities involved, including the ones in the JOIN or WHERE clauses. For example, if searching by Customer Name for Products, you must SELECT "Customer"."id", "Product"."id", "Product"."name" FROM ...
-13. IMPORTANT: When joining multiple tables, ALWAYS use explicit aliases for ID columns to avoid name collisions (e.g. SELECT "Customer"."id" AS "customerId", "Order"."id" AS "orderId"). Colliding column names like "id" will cause data loss in the final result object.
-14. Return ONLY raw SQL string. No markdown code blocks.`;
+12. IMPORTANT: When joining multiple tables, ALWAYS use explicit aliases for ID columns to avoid name collisions (e.g. SELECT "Customer"."id" AS "customerId", "Order"."id" AS "orderId").
+13. CONTEXT RESOLUTION: If the user query uses pronouns like "it", "this", "those", or "that customer", refer to the provided Conversation History to identify the target entity.
+14. Return ONLY raw SQL string. No markdown code blocks. ${formatHistory(history)}`;
 
             let userPrompt = userQuery;
             if (lastError) {
@@ -348,6 +356,7 @@ export async function POST(req: Request) {
     try {
         const body = await req.json();
         const userQuery = body?.query?.trim();
+        const history = body?.history || [];
 
         if (!userQuery) {
             return Response.json({ answer: "Please enter a valid query." });
@@ -359,7 +368,7 @@ export async function POST(req: Request) {
             });
         }
 
-        const intent = await classifyIntent(userQuery);
+        const intent = await classifyIntent(userQuery, history);
         console.log("Intent: " + intent);
 
         let lastSQL = "";
@@ -367,7 +376,7 @@ export async function POST(req: Request) {
         const mentionedIds = extractMentionedIds(userQuery);
         
         // --- Smart NER Step ---
-        const potentialEntities = await extractEntityNames(userQuery);
+        const potentialEntities = await extractEntityNames(userQuery, history);
         const resolvedIds = await resolveEntities(potentialEntities);
         // ----------------------
 
@@ -384,7 +393,7 @@ export async function POST(req: Request) {
             highlightedIds = await traverseGraph(seedIds, 1);
         } else {
             // Run SQL
-            const sqlResult = await runSQLQuery(userQuery);
+            const sqlResult = await runSQLQuery(userQuery, history);
             dbResultForAnswer = sqlResult.rows;
             lastSQL = sqlResult.sql;
             
@@ -421,7 +430,9 @@ export async function POST(req: Request) {
             messages: [
                 {
                     role: "system",
-                    content: "You are a data analyst. Convert database results into a clear, concise natural language answer. Use bullet points for listing details. Mention IDs clearly so the user knows what was found on the graph.",
+                    content: `You are a data analyst. Convert database results into a clear, concise natural language answer. 
+Use bullet points for listing details. Mention IDs clearly so the user knows what was found on the graph.
+Use the Conversation History to understand context and avoid repetition.${formatHistory(history)}`,
                 },
                 {
                     role: "user",
