@@ -184,7 +184,7 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
                 setEdges(styledEdges);
                 setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 50);
             });
-    }, [query]);
+    }, []); // Run once on mount for stability
 
     // Auto-pan to highlighted nodes
     useEffect(() => {
@@ -195,14 +195,17 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
                 return highlightSet.has(rawId);
             })
             .map((n) => n.id);
-        if (hlNodeIds.length === 0) return;
-        setTimeout(() => {
+        const timer = setTimeout(() => {
             fitView({
                 nodes: hlNodeIds.map((id) => ({ id })),
-                padding: 0.3,
-                duration: 600,
+                padding: 0.2, // Snug zoom
+                duration: 800,
+                minZoom: 0.1,
+                maxZoom: 1.5, // Don't zoom in TOO much on single nodes
             });
-        }, 100);
+        }, 300); // Wait for animations/rendering to settle
+
+        return () => clearTimeout(timer);
     }, [highlightedIds, nodes, fitView, highlightSet]);
 
     // ── Node highlights: seed / highlighted / dimmed ──
