@@ -51,11 +51,11 @@ function extractHighlightedIds(rows: any[]): string[] {
         if (!row || typeof row !== 'object') continue;
         for (const col of ID_COLUMNS) {
             const val = row[col];
-            if (val && typeof val === "string") ids.add(val);
+            if (val && typeof val === "string") ids.add(val.toUpperCase());
         }
         for (const val of Object.values(row)) {
             if (typeof val === "string" && (/^[SB]\d{10,}/i.test(val) || /^\d{6,}$/.test(val))) {
-                ids.add(val);
+                ids.add(val.toUpperCase());
             }
         }
     }
@@ -298,7 +298,8 @@ Rules:
 10. Use ILIKE for case-insensitive text search.
 11. Always LIMIT 50.
 12. CRITICAL: If you are answering a "How many" or "List" query, you MUST still SELECT the "id" columns of ALL entities involved, including the ones in the JOIN or WHERE clauses. For example, if searching by Customer Name for Products, you must SELECT "Customer"."id", "Product"."id", "Product"."name" FROM ...
-13. Return ONLY raw SQL string. No markdown code blocks.`;
+13. IMPORTANT: When joining multiple tables, ALWAYS use explicit aliases for ID columns to avoid name collisions (e.g. SELECT "Customer"."id" AS "customerId", "Order"."id" AS "orderId"). Colliding column names like "id" will cause data loss in the final result object.
+14. Return ONLY raw SQL string. No markdown code blocks.`;
 
             let userPrompt = userQuery;
             if (lastError) {
@@ -399,18 +400,13 @@ export async function POST(req: Request) {
                 // Combine mentioned, resolved, LLM seeds, and extracted IDs
                 seedIds = Array.from(new Set([...mentionedIds, ...resolvedIds, ...filtered.seeds]));
                 
-                if (intent === "flow_trace") {
-                    // For flow trace, we MUST highlight everything found in the SQL result
-                    highlightedIds = Array.from(new Set([...seedIds, ...filtered.highlights, ...extractedIds]));
-                } else {
-                    const llmHighlights = filtered.highlights;
-                    if (llmHighlights.length > 0) {
-                        // Trust the LLM's specific path
-                        highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights]));
-                    } else {
-                        // Fallback to 1-hop if LLM gave no context
-                        highlightedIds = await traverseGraph(seedIds, 1);
-                    }
+                // ALWAYS include extractedIds in highlightedIds for both flow_trace and sql intent to ensure everything in search result is lit up
+                const llmHighlights = filtered.highlights;
+                highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights, ...extractedIds]));
+
+                if (intent !== "flow_trace" && llmHighlights.length === 0 && extractedIds.length === 0) {
+                    // Fallback to 1-hop if we had seedIds but no context from SQL or LLM
+                    highlightedIds = await traverseGraph(seedIds, 1);
                 }
             } else {
                 // TOTAL FALLBACK: If SQL returned 0 rows and LLM failed, use mentioned IDs

@@ -8,63 +8,54 @@ datasource db {
 }
 
 model Customer {
-  id   String @id
-  name String
-
+  id       String    @id
+  name     String
   metadata String?
-
-  orders   Order[]
   invoices Invoice[]
+  orders   Order[]
   payments Payment[]
 }
 
 model Order {
-  id             String @id
+  id             String        @id
   customerId     String
   createdAt      String
   totalAmount    Float
   deliveryStatus String
-
-  metadata String?
-
-  customer     Customer      @relation(fields: [customerId], references: [id])
-  items        OrderItem[]
-  invoices     Invoice[]
-  invoiceItems InvoiceItem[]
-  deliveries   Delivery[]
+  metadata       String?
+  deliveries     Delivery[]
+  invoices       Invoice[]
+  invoiceItems   InvoiceItem[]
+  customer       Customer      @relation(fields: [customerId], references: [id])
+  items          OrderItem[]
 }
 
 model Product {
-  id   String @id
-  name String
-
-  metadata String?
-
-  orderItems    OrderItem[]
-  invoiceItems  InvoiceItem[]
+  id            String         @id
+  name          String
+  metadata      String?
   deliveryItems DeliveryItem[]
+  invoiceItems  InvoiceItem[]
+  orderItems    OrderItem[]
 }
 
 model JournalEntry {
-  id        String @id
+  id        String  @id
   invoiceId String
   amount    Float
   createdAt String
-
-  metadata String?
-
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  metadata  String?
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
 }
 
 model Delivery {
-  id        String  @id
+  id        String         @id
   orderId   String?
   createdAt String
   status    String
   metadata  String?
-
-  order Order?         @relation(fields: [orderId], references: [id])
-  items DeliveryItem[]
+  order     Order?         @relation(fields: [orderId], references: [id])
+  items     DeliveryItem[]
 }
 
 model DeliveryItem {
@@ -77,31 +68,28 @@ model DeliveryItem {
 }
 
 model OrderItem {
-  id        String @id
+  id        String  @id
   orderId   String
   productId String
   quantity  Float
   netAmount Float
-
-  metadata String?
-
-  order   Order   @relation(fields: [orderId], references: [id])
-  product Product @relation(fields: [productId], references: [id])
+  metadata  String?
+  order     Order   @relation(fields: [orderId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
 }
 
 model Invoice {
-  id                 String  @id
+  id                 String         @id
   customerId         String
   orderId            String?
   accountingDocument String
   totalAmount        Float
   createdAt          String
   metadata           String?
-
-  customer       Customer       @relation(fields: [customerId], references: [id])
-  order          Order?         @relation(fields: [orderId], references: [id])
-  journalEntries JournalEntry[]
-  items          InvoiceItem[]
+  customer           Customer       @relation(fields: [customerId], references: [id])
+  order              Order?         @relation(fields: [orderId], references: [id])
+  items              InvoiceItem[]
+  journalEntries     JournalEntry[]
 }
 
 model InvoiceItem {
@@ -112,17 +100,15 @@ model InvoiceItem {
   quantity  Float
   netAmount Float
   invoice   Invoice @relation(fields: [invoiceId], references: [id])
-  product   Product @relation(fields: [productId], references: [id])
   order     Order   @relation(fields: [orderId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
 }
 
 model Payment {
-  id         String @id
+  id         String   @id
   customerId String
   amount     Float
   createdAt  String
-
-  metadata String?
-
-  customer Customer @relation(fields: [customerId], references: [id])
+  metadata   String?
+  customer   Customer @relation(fields: [customerId], references: [id])
 }

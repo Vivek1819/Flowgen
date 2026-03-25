@@ -191,7 +191,7 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
         if (highlightedIds.length === 0 || nodes.length === 0) return;
         const hlNodeIds = nodes
             .filter((n) => {
-                const rawId = n.id.split("-").slice(1).join("-");
+                const rawId = n.id.split("-").slice(1).join("-").toUpperCase();
                 return highlightSet.has(rawId);
             })
             .map((n) => n.id);
@@ -209,7 +209,7 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
     const highlightedNodes = useMemo(
         () =>
             nodes.map((n) => {
-                const rawId = n.id.split("-").slice(1).join("-");
+                const rawId = n.id.split("-").slice(1).join("-").toUpperCase();
                 const isHighlighted = highlightSet.has(rawId);
                 const isSeed = seedSet.has(rawId);
                 const dimmed = false;
@@ -228,8 +228,8 @@ function GraphInner({ query, highlightedIds, seedIds, highlightMode }: GraphInne
                 if (!hasHighlights) return e;
                 if (highlightMode === "nodes_only") return e;
 
-                const sourceRaw = e.source.split("-").slice(1).join("-");
-                const targetRaw = e.target.split("-").slice(1).join("-");
+                const sourceRaw = e.source.split("-").slice(1).join("-").toUpperCase();
+                const targetRaw = e.target.split("-").slice(1).join("-").toUpperCase();
                 const bothHighlighted = highlightSet.has(sourceRaw) && highlightSet.has(targetRaw);
 
                 if (bothHighlighted) {
