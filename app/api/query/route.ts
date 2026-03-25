@@ -379,6 +379,7 @@ export async function POST(req: Request) {
             const gapIds = await runGapAnalysis();
             dbResultForAnswer = [{ message: "Found potential gaps in these representative entities", entities: gapIds }];
             seedIds = gapIds.slice(0, 5);
+            // For gap analysis, we want to see the immediate context of these gaps
             highlightedIds = await traverseGraph(seedIds, 1);
         } else {
             // Run SQL
@@ -386,20 +387,30 @@ export async function POST(req: Request) {
             dbResultForAnswer = sqlResult.rows;
             lastSQL = sqlResult.sql;
             
+            // Extract ALL IDs from the result rows to ensure we don't miss anything in the flow
+            const extractedIds = extractHighlightedIds(dbResultForAnswer);
+            console.log(`Extracted ${extractedIds.length} IDs from database results`);
+
             // Intelligent Filtering — Let LLM choose what's actually relevant
             const filtered = await selectRelevantEntities(userQuery, intent, dbResultForAnswer);
-            console.log("Smart Highlighting:", filtered);
+            console.log("Smart Highlighting (LLM):", filtered);
 
-            if (filtered.seeds.length > 0 || dbResultForAnswer.length > 0) {
+            if (filtered.seeds.length > 0 || extractedIds.length > 0) {
+                // Combine mentioned, resolved, LLM seeds, and extracted IDs
                 seedIds = Array.from(new Set([...mentionedIds, ...resolvedIds, ...filtered.seeds]));
-                const llmHighlights = filtered.highlights;
                 
-                if (llmHighlights.length > 0) {
-                    // Trust the LLM's specific path
-                    highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights]));
+                if (intent === "flow_trace") {
+                    // For flow trace, we MUST highlight everything found in the SQL result
+                    highlightedIds = Array.from(new Set([...seedIds, ...filtered.highlights, ...extractedIds]));
                 } else {
-                    // Fallback to 1-hop if LLM gave no context
-                    highlightedIds = await traverseGraph(seedIds, 1);
+                    const llmHighlights = filtered.highlights;
+                    if (llmHighlights.length > 0) {
+                        // Trust the LLM's specific path
+                        highlightedIds = Array.from(new Set([...seedIds, ...llmHighlights]));
+                    } else {
+                        // Fallback to 1-hop if LLM gave no context
+                        highlightedIds = await traverseGraph(seedIds, 1);
+                    }
                 }
             } else {
                 // TOTAL FALLBACK: If SQL returned 0 rows and LLM failed, use mentioned IDs
