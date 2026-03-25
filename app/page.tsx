@@ -55,8 +55,9 @@ export default function Home() {
       const decoder = new TextEncoder();
       let assistantMessage = "";
       
-      // Add initial empty assistant message
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      
+      // Remove initial empty assistant message to avoid "double box" UI
+      // setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
       const processChunk = (chunk: string) => {
         const lines = chunk.split("\n");
@@ -70,9 +71,13 @@ export default function Home() {
               assistantMessage += data.content;
               setStatus(""); // Clear status once we start getting the answer
               setMessages((prev) => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1].content = assistantMessage;
-                return newMessages;
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg?.role === "assistant") {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1].content = assistantMessage;
+                  return newMessages;
+                }
+                return [...prev, { role: "assistant", content: assistantMessage }];
               });
             } else if (data.type === "metadata") {
               if (Array.isArray(data.highlightedIds)) {
@@ -82,9 +87,13 @@ export default function Home() {
               }
             } else if (data.type === "error") {
                setMessages((prev) => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1].content = data.content;
-                return newMessages;
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg?.role === "assistant") {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1].content = data.content;
+                  return newMessages;
+                }
+                return [...prev, { role: "assistant", content: data.content }];
               });
             }
           } catch (e) {
@@ -237,18 +246,18 @@ export default function Home() {
                 </div>
               ))}
 
-              {loading && (
+              {loading && messages[messages.length - 1]?.role === "user" && (
                 <div className="flex flex-col gap-2 max-w-[90%]">
-                  <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gray-50 rounded-xl border border-gray-100 w-fit">
-                    <div className="flex gap-1">
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50 rounded-xl border border-gray-100 w-fit shadow-sm">
+                    <div className="flex gap-1.5 shrink-0">
                       <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "0ms" }} />
                       <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "150ms" }} />
                       <div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "300ms" }} />
                     </div>
+                    {status && (
+                      <span className="text-[12px] text-gray-500 font-medium animate-pulse">{status}</span>
+                    )}
                   </div>
-                  {status && (
-                    <p className="text-[11px] text-gray-400 ml-1 animate-pulse italic">{status}</p>
-                  )}
                 </div>
               )}
 
