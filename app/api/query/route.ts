@@ -62,6 +62,61 @@ function extractHighlightedIds(rows: any[]): string[] {
     return Array.from(ids);
 }
 
+// ─────────────────────────────────────────────
+// Smart Entity Resolution (NER + DB Lookup)
+// ─────────────────────────────────────────────
+
+async function extractEntityNames(query: string): Promise<{ name: string; type: "customer" | "product" | "order" }[]> {
+    try {
+        const res = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile",
+            messages: [
+                {
+                    role: "system",
+                    content: `Extract potential entity names and their types from the user query.
+Types: "customer", "product", "order".
+Ignore generic words. Focus on proper names or specific IDs if they look like names.
+Example: "Melton Group" -> {"entities": [{"name": "Melton Group", "type": "customer"}]}
+Return ONLY a JSON object: {"entities": [{"name": "string", "type": "customer|product|order"}]}.`
+                },
+                { role: "user", content: query }
+            ],
+            response_format: { type: "json_object" }
+        });
+        const content = JSON.parse(res.choices[0]?.message?.content || "{}");
+        return content.entities || [];
+    } catch (err) {
+        console.error("NER Error:", err);
+        return [];
+    }
+}
+
+async function resolveEntities(entities: { name: string; type: string }[]): Promise<string[]> {
+    const foundIds: string[] = [];
+    for (const ent of entities) {
+        if (ent.type === "customer") {
+            const matches = await prisma.customer.findMany({
+                where: { name: { contains: ent.name, mode: 'insensitive' } },
+                select: { id: true }
+            });
+            foundIds.push(...matches.map(m => m.id));
+        } else if (ent.type === "product") {
+            const matches = await prisma.product.findMany({
+                where: { name: { contains: ent.name, mode: 'insensitive' } },
+                select: { id: true }
+            });
+            foundIds.push(...matches.map(m => m.id));
+        } else if (ent.type === "order") {
+             const matches = await prisma.order.findMany({
+                where: { id: { contains: ent.name, mode: 'insensitive' } },
+                select: { id: true }
+            });
+            foundIds.push(...matches.map(m => m.id));
+        }
+    }
+    return Array.from(new Set(foundIds));
+}
+
 // Intent Classification
 type QueryIntent = "sql" | "flow_trace" | "entity_explore" | "gap_analysis";
 
@@ -165,8 +220,10 @@ Categories:
 Rules:
 1. Return ONLY a JSON object: {"seeds": ["ID1", "ID2"], "highlights": ["ID3", "ID4"]}.
 2. CRITICAL: If the user asks for a TYPE (e.g., "Which customers"), you MUST include the IDs of those customers in "seeds".
-3. Only use IDs present in the results.
-4. If there are many results (>15), only pick the top/most representative ones.`
+3. CRITICAL: If the user refers to a named entity (e.g. "Melton Group"), you MUST include its ID in "seeds" if present in the results.
+4. Only use IDs present in the results.
+5. If there are many results (>25), pick the most relevant ones. Do not be too stingy; we want a rich graph.
+6. Look at ALL columns in the result rows, not just the obvious ones. Any string that looks like an ID should be considered.`
                 },
                 {
                     role: "user",
@@ -200,7 +257,7 @@ async function runGapAnalysis(): Promise<string[]> {
     return rows.map((r: any) => r.id);
 }
 
-async function runSQLQuery(userQuery: string): Promise<any[]> {
+async function runSQLQuery(userQuery: string): Promise<{ rows: any[], sql: string }> {
     let attempts = 0;
     let lastError = "";
     let lastSQL = "";
@@ -230,10 +287,18 @@ Rules:
 4. ALL "id" columns are TEXT. Wrap ID values in single quotes.
 5. CRITICAL: JOIN clauses MUST come BEFORE WHERE clauses.
 6. MANDATORY: ALWAYS select the "id" columns for every table you JOIN or FROM (e.g. "Customer"."id", "Order"."id") so they can be highlighted on the graph.
-7. CRITICAL: Use LEFT JOIN when asked to "trace" or "show flow" for a specific ID to ensure the query doesn't return 0 rows if some documents in the chain are missing.
-8. Use ILIKE for case-insensitive text search.
-9. Always LIMIT 50.
-10. Return ONLY raw SQL string. No markdown code blocks.`;
+7. CRITICAL RELATIONS: 
+   - "Order"."customerId" = "Customer"."id"
+   - "OrderItem"."orderId" = "Order"."id"
+   - "Invoice"."orderId" = "Order"."id"
+   - "JournalEntry"."invoiceId" = "Invoice"."id"
+   - "Delivery"."orderId" = "Order"."id"
+8. CRITICAL: Use LEFT JOIN when asked to "trace" or "show flow" for a specific ID to ensure the query doesn't return 0 rows if some documents in the chain are missing.
+9. JOIN MINIMIZATION: Only JOIN tables that are absolutely necessary to answer the question. For example, if asked about Customer and Products, do NOT join Delivery, Invoice, or Payment tables unless specifically requested. Over-joining with INNER JOIN will cause 0 results if one part of the flow is missing.
+10. Use ILIKE for case-insensitive text search.
+11. Always LIMIT 50.
+12. CRITICAL: If you are answering a "How many" or "List" query, you MUST still SELECT the "id" columns of ALL entities involved, including the ones in the JOIN or WHERE clauses. For example, if searching by Customer Name for Products, you must SELECT "Customer"."id", "Product"."id", "Product"."name" FROM ...
+13. Return ONLY raw SQL string. No markdown code blocks.`;
 
             let userPrompt = userQuery;
             if (lastError) {
@@ -254,11 +319,11 @@ Ensure all identifiers are double-quoted.`;
             });
 
             const sql = sqlGen.choices[0]?.message?.content?.trim().replace(/```sql|```/g, "") || "";
-            if (!sql) return [];
+            if (!sql) return { rows: [], sql: "" };
             lastSQL = sql;
             console.log("SQL Attempt " + attempts + ": " + sql);
 
-            if (!isSafeSQL(sql)) return [];
+            if (!isSafeSQL(sql)) return { rows: [], sql };
 
             const result = await prisma.$queryRawUnsafe<any[]>(sql);
             const rows = Array.isArray(result) ? result : [];
@@ -268,14 +333,14 @@ Ensure all identifiers are double-quoted.`;
                  continue;
             }
 
-            return rows;
+            return { rows, sql };
         } catch (err: any) {
             console.error("SQL Error Attempt " + attempts + ": " + err.message);
             lastError = err.message;
-            if (attempts >= 2) return [];
+            if (attempts >= 2) return { rows: [], sql: lastSQL };
         }
     }
-    return [];
+    return { rows: [], sql: lastSQL };
 }
 
 export async function POST(req: Request) {
@@ -296,10 +361,17 @@ export async function POST(req: Request) {
         const intent = await classifyIntent(userQuery);
         console.log("Intent: " + intent);
 
+        let lastSQL = "";
+
         const mentionedIds = extractMentionedIds(userQuery);
         
+        // --- Smart NER Step ---
+        const potentialEntities = await extractEntityNames(userQuery);
+        const resolvedIds = await resolveEntities(potentialEntities);
+        // ----------------------
+
         let highlightedIds: string[] = [];
-        let seedIds: string[] = [...mentionedIds];
+        let seedIds: string[] = Array.from(new Set([...mentionedIds, ...resolvedIds]));
         let dbResultForAnswer: any[] = [];
 
         // ── STEP 2: Main Logic ───────────────────────────────────────────────
@@ -310,14 +382,16 @@ export async function POST(req: Request) {
             highlightedIds = await traverseGraph(seedIds, 1);
         } else {
             // Run SQL
-            dbResultForAnswer = await runSQLQuery(userQuery);
+            const sqlResult = await runSQLQuery(userQuery);
+            dbResultForAnswer = sqlResult.rows;
+            lastSQL = sqlResult.sql;
             
             // Intelligent Filtering — Let LLM choose what's actually relevant
             const filtered = await selectRelevantEntities(userQuery, intent, dbResultForAnswer);
             console.log("Smart Highlighting:", filtered);
 
             if (filtered.seeds.length > 0 || dbResultForAnswer.length > 0) {
-                seedIds = Array.from(new Set([...mentionedIds, ...filtered.seeds]));
+                seedIds = Array.from(new Set([...mentionedIds, ...resolvedIds, ...filtered.seeds]));
                 const llmHighlights = filtered.highlights;
                 
                 if (llmHighlights.length > 0) {

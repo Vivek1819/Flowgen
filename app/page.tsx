@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import Graph from "./components/Graph";
+import ReactMarkdown from "react-markdown";
 
 export default function Home() {
   const [messages, setMessages] = useState<
@@ -151,13 +152,17 @@ export default function Home() {
             {messages.map((msg, idx) => (
               <div
                 key={idx}
-                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl whitespace-pre-wrap ${
+                className={`text-[13px] leading-relaxed px-3.5 py-2.5 rounded-xl ${
                   msg.role === "user"
-                    ? "bg-gray-900 text-white ml-auto rounded-br-md w-fit max-w-[85%]"
-                    : "bg-gray-50 text-gray-700 border border-gray-100 rounded-bl-md max-w-[90%]"
+                    ? "bg-gray-900 text-white ml-auto rounded-br-md w-fit max-w-[85%] whitespace-pre-wrap"
+                    : "bg-gray-50 text-gray-700 border border-gray-100 rounded-bl-md max-w-[90%] markdown-content"
                 }`}
               >
-                {msg.content}
+                {msg.role === "user" ? (
+                  msg.content
+                ) : (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                )}
               </div>
             ))}
 
