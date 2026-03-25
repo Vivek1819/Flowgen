@@ -303,13 +303,14 @@ Rules:
    - "JournalEntry"."invoiceId" = "Invoice"."id"
    - "Delivery"."orderId" = "Order"."id"
 8. CRITICAL: Use LEFT JOIN when asked to "trace" or "show flow" for a specific ID to ensure the query doesn't return 0 rows if some documents in the chain are missing.
-9. JOIN MINIMIZATION: Only JOIN tables that are absolutely necessary to answer the question.
-10. Use ILIKE for case-insensitive text search.
-11. Always LIMIT 50.
-12. IMPORTANT: When joining multiple tables, ALWAYS use explicit aliases for ID columns to avoid name collisions (e.g. SELECT "Customer"."id" AS "customerId", "Order"."id" AS "orderId").
-13. CONTEXT RESOLUTION: If the user query uses pronouns like "it", "this", "those", or "that customer", refer to the provided Conversation History to identify the target entity.
-14. Return ONLY raw SQL string. NO MARKDOWN. NO EXPLANATIONS. NO TRIPLE BACKTICKS. NO INTRODUCTORY TEXT.
-15. IF YOU ADD ANY TEXT OTHER THAN THE SQL QUERY, THE SYSTEM WILL FAIL. ${formatHistory(history)}`;
+9. JOIN MINIMIZATION: Only JOIN tables that are absolutely necessary.
+10. Use ILIKE for case-insensitive search.
+11. LIMIT your results to 100 for listings, but DO NOT limit for aggregate queries (SUM, COUNT).
+12. DEFINITION: "Spending" or "Purchases" refers to the SUM of "Order"."totalAmount".
+13. IMPORTANT: When joining tables, ALWAYS use explicit aliases for ID columns (e.g. SELECT "Customer"."id" AS "customerId", "Order"."id" AS "orderId").
+15. Return ONLY raw SQL string. NO MARKDOWN. NO EXPLANATIONS.
+16. CRITICAL: Always prioritize the CURRENT Database schema and results over any numbers mentioned in the Conversation History.
+17. IF YOU ADD ANY TEXT OTHER THAN THE SQL QUERY, THE SYSTEM WILL FAIL. ${formatHistory(history)}`;
 
             let userPrompt = userQuery;
             if (lastError) {
@@ -460,7 +461,8 @@ export async function POST(req: Request) {
                             role: "system",
                             content: `You are a data analyst. Convert database results into a clear, concise natural language answer. 
 Use bullet points for listing details. Mention IDs clearly so the user knows what was found on the graph.
-Use the Conversation History to understand context and avoid repetition.${formatHistory(history)}`,
+CRITICAL: Always prioritize the CURRENT Database Results provided below over any conflicting values in the Conversation History.
+Use the Conversation History only for context and resolving pronouns like "it" or "that".${formatHistory(history)}`,
                         },
                         {
                             role: "user",

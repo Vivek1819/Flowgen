@@ -123,8 +123,6 @@ async function main() {
                 "Unknown",
             metadata: JSON.stringify(cleanMetadata(c)),
         });
-
-        if (customerData.length >= 200) break;
     }
 
     await prisma.customer.createMany({ data: customerData, skipDuplicates: true });
@@ -144,8 +142,6 @@ async function main() {
             name: material,
             metadata: JSON.stringify(cleanMetadata(item)),
         });
-
-        if (productData.length >= 200) break;
     }
 
     await prisma.product.createMany({ data: productData, skipDuplicates: true });
@@ -171,7 +167,6 @@ async function main() {
         });
 
         insertedOrderIds.add(orderId);
-        if (orderData.length >= 2000) break; 
     }
 
     await prisma.order.createMany({ data: orderData, skipDuplicates: true });
@@ -242,8 +237,6 @@ async function main() {
             netAmount: Number(get(i, "netAmount", "NetAmount") || 0),
             metadata: JSON.stringify(cleanMetadata(i)),
         });
-
-        if (orderItemData.length >= 500) break;
     }
     await prisma.orderItem.createMany({ data: orderItemData, skipDuplicates: true });
     console.log("OrderItems inserted:", orderItemData.length);
@@ -283,8 +276,6 @@ async function main() {
                 metadata: JSON.stringify(cleanMetadata(i)),
             });
         }
-
-        if (invoiceData.length >= 1000) break;
     }
 
     await prisma.invoice.createMany({ data: invoiceData, skipDuplicates: true });
@@ -306,8 +297,6 @@ async function main() {
             createdAt: get(p, "postingDate", "PostingDate") || "",
             metadata: JSON.stringify(cleanMetadata(p)),
         });
-
-        if (paymentData.length >= 200) break;
     }
     await prisma.payment.createMany({ data: paymentData, skipDuplicates: true });
     console.log("Payments inserted:", paymentData.length);
@@ -331,7 +320,6 @@ async function main() {
         });
 
         insertedDeliveryIds.add(deliveryId);
-        if (deliveryData.length >= 1000) break;
     }
 
     await prisma.delivery.createMany({ data: deliveryData, skipDuplicates: true });
@@ -358,8 +346,6 @@ async function main() {
             productId,
             quantity: Number(get(item, "actualDeliveryQuantity", "ActualDeliveryQuantity") || 0),
         });
-
-        if (delItemData.length >= 500) break;
     }
     await prisma.deliveryItem.createMany({ data: delItemData, skipDuplicates: true });
     console.log("Delivery Items inserted:", delItemData.length);
@@ -382,8 +368,6 @@ async function main() {
             quantity: Number(get(item, "billingQuantity", "BillingQuantity") || 0),
             netAmount: Number(get(item, "netAmount", "NetAmount") || 0),
         });
-
-        if (invItemData.length >= 500) break;
     }
     await prisma.invoiceItem.createMany({ data: invItemData, skipDuplicates: true });
     console.log("Invoice Items inserted:", invItemData.length);
@@ -402,8 +386,6 @@ async function main() {
             createdAt: get(j, "postingDate", "PostingDate") || "",
             metadata: JSON.stringify(cleanMetadata(j)),
         });
-
-        if (journalBatchData.length >= 200) break;
     }
     await prisma.journalEntry.createMany({ data: journalBatchData, skipDuplicates: true });
     console.log("Journal Entries inserted:", journalBatchData.length);
